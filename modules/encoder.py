@@ -1,4 +1,4 @@
-"""Rotary encoder wrapper using micropython-rotary library."""
+"""Rotary encoder wrapper using micropython-rotary library with interrupt-based button."""
 
 import time
 
@@ -40,6 +40,10 @@ class RotaryEncoder:
         self._pending_events = []
         self._last_position = 0
         
+        # Button state for interrupt handler
+        self._button_down_at = None
+        self._last_button_irq = 0
+        
         if pin_factory is None or not _HAS_HARDWARE:
             self._rotary = None
             self.sw = None
@@ -53,11 +57,10 @@ class RotaryEncoder:
                 half_step=False,
             )
             self._rotary.add_listener(self._on_rotation)
+            
+            # Set up interrupt-based button handling
             self.sw = pin_factory(sw_pin, pin_factory.IN, pin_factory.PULL_UP)
-
-        self.last_button = self._read_button(default=1)
-        self.button_down_at = None
-        self.last_button_event = 0
+            self.sw.irq(trigger=Pin.IRQ_FALLING | Pin.IRQ_RISING, handler=self._on_button)
 
     def _on_rotation(self):
         """Callback from RotaryIRQ when rotation detected."""
@@ -75,33 +78,41 @@ class RotaryEncoder:
         
         self._last_position = new_pos
 
+    def _on_button(self, pin):
+        """Interrupt handler for button press/release."""
+        now = ticks_ms()
+        
+        # Debounce check
+        if ticks_diff(now, self._last_button_irq) < ENCODER_DEBOUNCE_MS:
+            return
+        self._last_button_irq = now
+        
+        button_state = pin.value()
+        
+        if button_state == 0:
+            # Button pressed (falling edge)
+            self._button_down_at = now
+        else:
+            # Button released (rising edge)
+            if self._button_down_at is not None:
+                held_ms = ticks_diff(now, self._button_down_at)
+                if held_ms >= ENCODER_LONG_PRESS_MS:
+                    self.state.button_was_long = True
+                    self._pending_events.append("long")
+                else:
+                    self.state.button_was_long = False
+                    self._pending_events.append("click")
+                self._button_down_at = None
+
     def _read_button(self, default=1):
         if self.sw is None:
             return default
         return self.sw.value()
 
     def poll(self):
-        """Check for pending rotation events and poll button state."""
+        """Return pending events from interrupts."""
         events = list(self._pending_events)
         self._pending_events.clear()
-
-        now = ticks_ms()
-        button = self._read_button()
-        if button != self.last_button and ticks_diff(now, self.last_button_event) >= ENCODER_DEBOUNCE_MS:
-            self.last_button = button
-            self.last_button_event = now
-            if button == 0:
-                self.button_down_at = now
-            else:
-                if self.button_down_at is not None:
-                    held_ms = ticks_diff(now, self.button_down_at)
-                    if held_ms >= ENCODER_LONG_PRESS_MS:
-                        self.state.button_was_long = True
-                        events.append("long")
-                    else:
-                        self.state.button_was_long = False
-                        events.append("click")
-                self.button_down_at = None
         return events
 
     def inject(self, *events):
@@ -113,4 +124,5 @@ class RotaryEncoder:
                 self.state.position -= 1
             elif event == "long":
                 self.state.button_was_long = True
+            self._pending_events.append(event)
         return list(events)

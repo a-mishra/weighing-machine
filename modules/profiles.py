@@ -169,3 +169,16 @@ class ProfileStore:
             self.save(data)
             return item
         raise ValueError("Unknown profile")
+
+    def delete_profile(self, name):
+        data = self.load()
+        if len(data["profiles"]) <= 1:
+            raise ValueError("Cannot delete last profile")
+        names = [item["name"] for item in data["profiles"]]
+        if name not in names:
+            raise ValueError("Unknown profile")
+        data["profiles"] = [item for item in data["profiles"] if item["name"] != name]
+        if data["active_profile"] == name:
+            data["active_profile"] = data["profiles"][0]["name"]
+        self.save(data)
+        return data["active_profile"]

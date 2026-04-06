@@ -1,1 +1,1 @@
-{"language": "en", "profiles": [{"name": "Earth", "g": 9.8},{"name": "Moon", "g": 9.8},{"name": "Jupiter", "g": 9.8}], "active_profile": "default"}
+{"language": "en", "profiles": [{"name": "Earth", "g": 9.8}, {"name": "Moon", "g": 1.6}, {"name": "Jupiter", "g": 24.8}], "active_profile": "Earth"}

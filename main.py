@@ -13,7 +13,7 @@ from modules.display_ui import DisplayUI
 from modules.encoder import RotaryEncoder
 from modules.lang import tr
 from modules.profiles import ProfileStore, clamp_g_value
-from modules.scale import ScaleSensor
+from modules.scale import ScaleSensor, load_calibration, save_calibration
 
 try:
     from drivers.hx711 import HX711
@@ -32,10 +32,13 @@ class WeighingMachineApp:
 
         self.state = "live"
         self.menu_keys = [
+            "back",
             "select_profile",
             "create_profile",
             "edit_name",
             "edit_g",
+            "delete_profile",
+            "calibrate",
             "language",
             "buzzer_test",
         ]
@@ -43,11 +46,31 @@ class WeighingMachineApp:
         self.action_index = 0
         self.status_key = "stable"
         self.current_weight = 0.0
+        self.current_mass = 0.0  # g=1.0 calibrated mass value
+        self.locked_weight = None
+        self.lock_time = 0
+        self.stable_count = 0
         self.name_buffer = list("PROFILE   ")
         self.name_position = 0
         self.temp_g = config.DEFAULT_G_VALUE
         self.create_mode = False
         self.charset = config.PROFILE_NAME_CHARSET
+        
+        # Calibration state
+        self.cal_points = []
+        self.cal_raw = 0
+        self.cal_weight = config.CALIBRATE_DEFAULT_WEIGHT
+        self.cal_option = 0
+        self.cal_tare_offset = 0
+        self.cal_last_rotate = 0  # For fast rotation detection
+        self.cal_profile_g = config.DEFAULT_G_VALUE
+        
+        # Delete confirmation state
+        self.delete_option = 1  # Default to "No"
+        
+        # Profile selection state
+        self.profile_list_index = 0
+        self.profile_menu_items = []
 
     @property
     def language(self):
@@ -56,13 +79,60 @@ class WeighingMachineApp:
     def active_profile(self):
         return self.store.get_active_profile()
 
+    def _get_time_ms(self):
+        """Get current time in milliseconds."""
+        try:
+            return time.ticks_ms()
+        except AttributeError:
+            return int(time.time() * 1000)
+
     def refresh_weight(self):
-        self.current_weight = self.scale.read_kg()
-        self.status_key = "stable" if self.scale.is_stable() else "not_ready"
+        now = self._get_time_ms()
+        active_g = self.active_profile()["g"]
+        
+        # Check if we're in frozen state
+        if self.locked_weight is not None:
+            try:
+                elapsed = time.ticks_diff(now, self.lock_time)
+            except AttributeError:
+                elapsed = now - self.lock_time
+            
+            if elapsed < config.STABLE_FREEZE_MS:
+                # Still frozen - return locked weight
+                self.status_key = "locked"
+                return self.locked_weight
+            else:
+                # Freeze expired - unlock
+                self.locked_weight = None
+                self.stable_count = 0
+        
+        # Read new weight
+        self.current_mass = self.scale.read_filtered_kg()
+        self.current_weight = round(self.current_mass * active_g, config.WEIGHT_DECIMALS)
+        stability = self.scale.stability_level()
+        
+        if stability == "stable":
+            self.stable_count += 1
+            if self.stable_count >= config.STABLE_LOCK_COUNT:
+                # Lock the weight
+                self.locked_weight = self.current_weight
+                self.lock_time = now
+                self.status_key = "locked"
+                self.buzzer.beep(50)  # Short beep to indicate lock
+            else:
+                self.status_key = "stable"
+        else:
+            self.stable_count = 0
+            if stability == "settling":
+                self.status_key = "settling"
+            else:
+                self.status_key = "not_ready"
+        
         return self.current_weight
 
     def tare_scale(self):
         self.scale.tare()
+        save_calibration(self.scale.offset, self.scale.scale_factor)
         self.status_key = "saved"
         self.buzzer.double_beep()
 
@@ -72,6 +142,8 @@ class WeighingMachineApp:
         names = [item["name"] for item in profiles]
         idx = (names.index(current) + 1) % len(names)
         self.store.select_profile(names[idx])
+        self.locked_weight = None
+        self.stable_count = 0
         self.status_key = "saved"
         self.buzzer.beep()
 
@@ -103,21 +175,149 @@ class WeighingMachineApp:
 
     def activate_menu(self):
         key = self.menu_keys[self.menu_index]
-        if key == "select_profile":
-            self.cycle_profile()
+        if key == "back":
             self.state = "live"
+        elif key == "select_profile":
+            self.start_profile_select()
         elif key == "create_profile":
             self.start_create_profile()
         elif key == "edit_name":
             self.start_edit_name()
         elif key == "edit_g":
             self.start_edit_g()
+        elif key == "delete_profile":
+            self.start_delete_profile()
+        elif key == "calibrate":
+            self.start_calibration()
         elif key == "language":
             self.toggle_language()
             self.state = "live"
         elif key == "buzzer_test":
             self.buzzer.warning_beep()
             self.state = "live"
+
+    def start_profile_select(self):
+        """Open profile selection list."""
+        profiles = self.store.list_profiles()
+        active_name = self.active_profile()["name"]
+        self.profile_menu_items = ["__back__"] + [p["name"] for p in profiles]
+        self.profile_list_index = 0
+        for i, p in enumerate(profiles):
+            if p["name"] == active_name:
+                self.profile_list_index = i + 1
+                break
+        self.state = "select_profile"
+        self.buzzer.beep()
+
+    def select_profile_at_index(self):
+        """Select the profile at current list index."""
+        if not self.profile_menu_items:
+            self.state = "live"
+            return
+
+        # First item is back navigation
+        if self.profile_list_index == 0:
+            self.state = "live"
+            self.buzzer.beep()
+            return
+
+        profile_name = self.profile_menu_items[self.profile_list_index]
+        self.store.select_profile(profile_name)
+        self.locked_weight = None
+        self.stable_count = 0
+        self.status_key = "saved"
+        self.buzzer.double_beep()
+        self.state = "live"
+
+    def start_delete_profile(self):
+        """Start delete profile confirmation."""
+        self.delete_option = 1  # Default to "No"
+        self.state = "confirm_delete"
+        self.buzzer.beep()
+
+    def confirm_delete_profile(self):
+        """Delete the active profile after confirmation."""
+        profile_name = self.active_profile()["name"]
+        try:
+            self.store.delete_profile(profile_name)
+            self.status_key = "saved"
+            self.buzzer.double_beep()
+        except ValueError:
+            self.status_key = "error"
+            self.buzzer.warning_beep()
+        self.state = "live"
+
+    def start_calibration(self):
+        """Start the calibration wizard."""
+        self.cal_points = []
+        self.cal_raw = 0
+        self.cal_weight = config.CALIBRATE_DEFAULT_WEIGHT
+        self.cal_option = 0
+        self.cal_tare_offset = 0
+        self.cal_profile_g = self.active_profile()["g"]
+        self.state = "cal_tare"
+        self.buzzer.beep()
+
+    def _read_cal_raw(self):
+        """Read raw sensor value for calibration."""
+        self.cal_raw = self.scale.read_raw()
+        return self.cal_raw
+
+    def _save_cal_tare(self):
+        """Save tare offset during calibration."""
+        self.cal_tare_offset = self.scale.read_raw()
+        self.state = "cal_place"
+        self.buzzer.beep()
+
+    def _save_cal_point(self):
+        """Save current calibration point."""
+        raw = self.scale.read_raw()
+        self.cal_points.append((raw, self.cal_weight))
+        self.cal_option = 0
+        self.state = "cal_confirm"
+        self.buzzer.beep()
+
+    def _change_cal_weight(self, direction, fast=False):
+        """Adjust calibration weight input."""
+        if fast:
+            step = config.CALIBRATE_WEIGHT_STEP_FAST
+        else:
+            step = config.CALIBRATE_WEIGHT_STEP
+        self.cal_weight += direction * step
+        self.cal_weight = max(config.CALIBRATE_WEIGHT_MIN, 
+                              min(config.CALIBRATE_WEIGHT_MAX, self.cal_weight))
+        self.cal_weight = round(self.cal_weight, 2)
+
+    def _finish_calibration(self):
+        """Calculate and apply calibration from collected points."""
+        if not self.cal_points:
+            self.state = "live"
+            return
+        
+        total_factor = 0
+        valid_points = 0
+        for raw, weight in self.cal_points:
+            # Convert entered profile-based weight to g=1 base mass.
+            # Example on Earth profile (g=9.8): 5.00 shown weight -> 0.5102 base mass.
+            base_mass = weight / self.cal_profile_g if self.cal_profile_g else 0
+            if base_mass > 0:
+                factor = (raw - self.cal_tare_offset) / base_mass
+                total_factor += factor
+                valid_points += 1
+
+        if valid_points == 0:
+            self.state = "live"
+            self.buzzer.warning_beep()
+            return
+
+        new_scale_factor = total_factor / valid_points
+        self.scale.scale_factor = new_scale_factor
+        self.scale.offset = self.cal_tare_offset
+        
+        save_calibration(self.cal_tare_offset, new_scale_factor)
+        
+        self.state = "cal_done"
+        self.buzzer.double_beep()
 
     def _buffer_name(self):
         return "".join(self.name_buffer).strip() or "PROFILE"
@@ -187,33 +387,46 @@ class WeighingMachineApp:
                 self._handle_name_event(event)
             elif self.state == "edit_g":
                 self._handle_g_event(event)
+            elif self.state == "select_profile":
+                self._handle_profile_select_event(event)
+            elif self.state == "confirm_delete":
+                self._handle_delete_event(event)
+            elif self.state == "cal_tare":
+                self._handle_cal_tare_event(event)
+            elif self.state == "cal_place":
+                self._handle_cal_place_event(event)
+            elif self.state == "cal_input":
+                self._handle_cal_input_event(event)
+            elif self.state == "cal_confirm":
+                self._handle_cal_confirm_event(event)
+            elif self.state == "cal_done":
+                self._handle_cal_done_event(event)
 
     def _handle_live_event(self, event):
         if event == "cw":
-            self.action_index = (self.action_index + 1) % len(config.DEFAULT_ACTIONS)
+            self.action_index = (self.action_index - 1) % len(config.DEFAULT_ACTIONS)
             self.buzzer.beep(20)
         elif event == "ccw":
-            self.action_index = (self.action_index - 1) % len(config.DEFAULT_ACTIONS)
+            self.action_index = (self.action_index + 1) % len(config.DEFAULT_ACTIONS)
             self.buzzer.beep(20)
         elif event == "click":
             action = config.DEFAULT_ACTIONS[self.action_index]
             if action == "menu":
                 self.state = "menu"
+                self.menu_index = 0
             elif action == "tare":
                 self.tare_scale()
             elif action == "profile":
-                self.cycle_profile()
+                self.start_profile_select()
             elif action == "send":
                 self.send_record()
-        elif event == "long":
-            self.state = "menu"
 
     def _handle_menu_event(self, event):
         if event == "cw":
-            self.menu_index = (self.menu_index + 1) % len(self.menu_keys)
+            self.menu_index = (self.menu_index - 1) % len(self.menu_keys)
             self.buzzer.beep(20)
         elif event == "ccw":
-            self.menu_index = (self.menu_index - 1) % len(self.menu_keys)
+            self.menu_index = (self.menu_index + 1) % len(self.menu_keys)
             self.buzzer.beep(20)
         elif event == "click":
             self.activate_menu()
@@ -222,9 +435,9 @@ class WeighingMachineApp:
 
     def _handle_name_event(self, event):
         if event == "cw":
-            self._change_current_char(1)
-        elif event == "ccw":
             self._change_current_char(-1)
+        elif event == "ccw":
+            self._change_current_char(1)
         elif event == "click":
             self.name_position = (self.name_position + 1) % config.PROFILE_NAME_LENGTH
         elif event == "long":
@@ -233,14 +446,97 @@ class WeighingMachineApp:
 
     def _handle_g_event(self, event):
         if event == "cw":
-            self._change_g(1)
+            self._change_g(-1)
             self.buzzer.beep(20)
         elif event == "ccw":
-            self._change_g(-1)
+            self._change_g(1)
             self.buzzer.beep(20)
         elif event == "click":
             self._save_g_and_exit()
         elif event == "long":
+            self.state = "live"
+
+    def _handle_profile_select_event(self, event):
+        total_items = len(self.profile_menu_items)
+        if total_items == 0:
+            self.state = "live"
+            return
+        if event == "cw":
+            self.profile_list_index = (self.profile_list_index - 1) % total_items
+            self.buzzer.beep(20)
+        elif event == "ccw":
+            self.profile_list_index = (self.profile_list_index + 1) % total_items
+            self.buzzer.beep(20)
+        elif event == "click":
+            self.select_profile_at_index()
+        elif event == "long":
+            self.state = "live"
+
+    def _handle_delete_event(self, event):
+        if event == "cw" or event == "ccw":
+            self.delete_option = 1 - self.delete_option
+            self.buzzer.beep(20)
+        elif event == "click":
+            if self.delete_option == 0:  # Yes
+                self.confirm_delete_profile()
+            else:  # No
+                self.state = "live"
+        elif event == "long":
+            self.state = "live"
+
+    def _handle_cal_tare_event(self, event):
+        if event == "click":
+            self._save_cal_tare()
+        elif event == "long":
+            self.state = "live"
+
+    def _handle_cal_place_event(self, event):
+        if event == "click":
+            self.state = "cal_input"
+            self.buzzer.beep()
+        elif event == "long":
+            self.state = "live"
+
+    def _get_ms(self):
+        """Get current time in milliseconds."""
+        try:
+            return time.ticks_ms()
+        except AttributeError:
+            return int(time.time() * 1000)
+
+    def _handle_cal_input_event(self, event):
+        if event == "cw" or event == "ccw":
+            now = self._get_ms()
+            try:
+                elapsed = time.ticks_diff(now, self.cal_last_rotate)
+            except AttributeError:
+                elapsed = now - self.cal_last_rotate
+            fast = elapsed < config.CALIBRATE_FAST_THRESHOLD_MS
+            self.cal_last_rotate = now
+            
+            direction = -1 if event == "cw" else 1
+            self._change_cal_weight(direction, fast=fast)
+            self.buzzer.beep(20)
+        elif event == "click":
+            self._save_cal_point()
+        elif event == "long":
+            self.state = "live"
+
+    def _handle_cal_confirm_event(self, event):
+        if event == "cw" or event == "ccw":
+            self.cal_option = 1 - self.cal_option
+            self.buzzer.beep(20)
+        elif event == "click":
+            if self.cal_option == 0:
+                self.state = "cal_place"
+                self.cal_weight = config.CALIBRATE_DEFAULT_WEIGHT
+            else:
+                self._finish_calibration()
+        elif event == "long":
+            self.state = "live"
+
+    def _handle_cal_done_event(self, event):
+        if event in ("click", "long"):
             self.state = "live"
 
     def render(self):
@@ -248,12 +544,14 @@ class WeighingMachineApp:
         language = self.language
         if self.state == "live":
             self.refresh_weight()
+            # Use locked_weight if frozen, otherwise current_weight
+            display_weight = self.locked_weight if self.locked_weight is not None else self.current_weight
             self.ui.draw_live(
                 language,
-                self.current_weight,
+                display_weight,
                 profile["name"],
                 profile["g"],
-                self.scale.is_stable(),
+                self.status_key,  # Use status_key which includes "locked" state
                 tr(language, self.status_key),
                 self.action_index,
             )
@@ -274,10 +572,59 @@ class WeighingMachineApp:
                 "%.1f m/s2" % self.temp_g,
                 "Click Save",
             )
+        elif self.state == "select_profile":
+            self.ui.draw_profile_list(language, self.profile_menu_items, self.profile_list_index)
+        elif self.state == "confirm_delete":
+            self.ui.draw_confirm_delete(
+                language,
+                profile["name"],
+                self.delete_option,
+            )
+        elif self.state == "cal_tare":
+            self._read_cal_raw()
+            self.ui.draw_calibrate_tare(language, self.cal_raw)
+        elif self.state == "cal_place":
+            self._read_cal_raw()
+            self.ui.draw_calibrate_place(language, self.cal_raw, len(self.cal_points) + 1)
+        elif self.state == "cal_input":
+            self.ui.draw_calibrate_input(language, self.cal_weight, len(self.cal_points) + 1)
+        elif self.state == "cal_confirm":
+            self.ui.draw_calibrate_confirm(language, self.cal_option, len(self.cal_points))
+        elif self.state == "cal_done":
+            self.ui.draw_calibrate_done(language, self.scale.scale_factor)
+
+    def auto_tare_on_startup(self):
+        """Wait for stable reading and auto-tare on startup."""
+        self.ui.draw_message(
+            self.language,
+            tr(self.language, "tare"),
+            "Auto-tare...",
+            "Keep scale empty",
+        )
+        
+        # Fill history with readings first
+        for _ in range(config.STABLE_WINDOW + 2):
+            self.scale.read_filtered_kg()
+            time.sleep(config.MAIN_LOOP_DELAY_MS / 1000.0)
+        
+        # Wait for stability
+        wait_interval = 100  # ms
+        max_iterations = config.AUTO_TARE_TIMEOUT_MS // wait_interval
+        for _ in range(max_iterations):
+            self.scale.read_filtered_kg()
+            if self.scale.stability_level() == "stable":
+                break
+            time.sleep(wait_interval / 1000.0)
+        
+        # Tare the scale and save to persistent storage
+        self.scale.tare()
+        save_calibration(self.scale.offset, self.scale.scale_factor)
+        self.buzzer.double_beep()
 
     def run(self, iterations=None):
         self.ui.splash(self.language)
         time.sleep(config.SPLASH_MS / 1000.0)
+        self.auto_tare_on_startup()
         count = 0
         while True:
             self.handle_events(self.encoder.poll())
@@ -293,7 +640,8 @@ def build_app():
     if HX711 is None:
         raise RuntimeError("Hardware build requires MicroPython on the Pico")
     adc = HX711(config.HX711_DATA_PIN, config.HX711_SCK_PIN, gain=config.HX711_GAIN)
-    scale = ScaleSensor(adc, scale_factor=config.DEFAULT_SCALE_FACTOR)
+    cal_offset, cal_scale = load_calibration()
+    scale = ScaleSensor(adc, offset=cal_offset, scale_factor=cal_scale)
     display = create_default_display(config)
     encoder = RotaryEncoder(config.ENCODER_CLK_PIN, config.ENCODER_DT_PIN, config.ENCODER_SW_PIN)
     cloud = CloudClient()

@@ -46,10 +46,12 @@ class ST7735:
         self._is_stub = framebuf is None or spi is None
         if not self._is_stub:
             self.buffer = bytearray(self.width * self.height * 2)
+            self._swap_buffer = bytearray(self.width * self.height * 2)  # For byte swapping
             self.fb = framebuf.FrameBuffer(self.buffer, self.width, self.height, framebuf.RGB565)
             self.init_display()
         else:
             self.buffer = bytearray()
+            self._swap_buffer = bytearray()
             self.fb = None
 
     def color565(self, red, green, blue):
@@ -88,9 +90,10 @@ class ST7735:
         self.write_cmd(0x3A)
         self.write_data(0x05)  # RGB565
         self.write_cmd(0x36)
+        # MADCTL: RGB order (no 0x08 bit)
         rotation_map = {0: 0x00, 1: 0x60, 2: 0xC0, 3: 0xA0}
         self.write_data(rotation_map.get(self.rotation, 0x00))
-        self.write_cmd(0x21)  # INVON
+        self.write_cmd(0x20)  # INVOFF - disable color inversion
         self.write_cmd(0x29)  # DISPON
         if self.bl is not None:
             self.bl.value(1)
@@ -204,7 +207,13 @@ class ST7735:
         if self._is_stub:
             return
         self.set_window(0, 0, self.width - 1, self.height - 1)
-        self.write_data(self.buffer)
+        # FrameBuffer stores RGB565 as little-endian bytes; ST7735 expects big-endian.
+        buf = self.buffer
+        swap = self._swap_buffer
+        for i in range(0, len(buf), 2):
+            swap[i] = buf[i + 1]
+            swap[i + 1] = buf[i]
+        self.write_data(swap)
 
 
 def create_default_display(config_module):
