@@ -46,12 +46,10 @@ class ST7735:
         self._is_stub = framebuf is None or spi is None
         if not self._is_stub:
             self.buffer = bytearray(self.width * self.height * 2)
-            self._swap_buffer = bytearray(self.width * self.height * 2)  # For byte swapping
             self.fb = framebuf.FrameBuffer(self.buffer, self.width, self.height, framebuf.RGB565)
             self.init_display()
         else:
             self.buffer = bytearray()
-            self._swap_buffer = bytearray()
             self.fb = None
 
     def color565(self, red, green, blue):
@@ -208,12 +206,17 @@ class ST7735:
             return
         self.set_window(0, 0, self.width - 1, self.height - 1)
         # FrameBuffer stores RGB565 as little-endian bytes; ST7735 expects big-endian.
+        # Swap in-place, write, then swap back to preserve framebuffer integrity.
         buf = self.buffer
-        swap = self._swap_buffer
         for i in range(0, len(buf), 2):
-            swap[i] = buf[i + 1]
-            swap[i + 1] = buf[i]
-        self.write_data(swap)
+            b0 = buf[i]
+            buf[i] = buf[i + 1]
+            buf[i + 1] = b0
+        self.write_data(buf)
+        for i in range(0, len(buf), 2):
+            b0 = buf[i]
+            buf[i] = buf[i + 1]
+            buf[i + 1] = b0
 
 
 def create_default_display(config_module):

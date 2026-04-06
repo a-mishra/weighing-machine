@@ -115,6 +115,10 @@ class RotaryEncoder:
         self._pending_events.clear()
         return events
 
+    def has_pending_events(self):
+        """Fast check for queued interrupt events."""
+        return len(self._pending_events) > 0
+
     def inject(self, *events):
         """Desktop test helper."""
         for event in events:

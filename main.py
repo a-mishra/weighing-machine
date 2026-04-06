@@ -33,16 +33,24 @@ class WeighingMachineApp:
         self.state = "live"
         self.menu_keys = [
             "back",
+            "recalibration",
+            "display_calibration",
+            "edit_config",
+            "reset_config",
+            "language",
+        ]
+        self.profile_menu_keys = [
+            "back",
             "select_profile",
             "create_profile",
             "edit_name",
             "edit_g",
             "delete_profile",
-            "calibrate",
-            "language",
-            "buzzer_test",
         ]
+        self.language_menu_keys = ["back", "english", "hindi"]
         self.menu_index = 0
+        self.profile_menu_index = 0
+        self.language_menu_index = 0
         self.action_index = 0
         self.status_key = "stable"
         self.current_weight = 0.0
@@ -72,6 +80,11 @@ class WeighingMachineApp:
         self.profile_list_index = 0
         self.profile_menu_items = []
 
+        # Runtime-editable configuration
+        self.runtime_stable_lock_count = config.STABLE_LOCK_COUNT
+        self.runtime_stable_freeze_ms = config.STABLE_FREEZE_MS
+        self.config_edit_index = 0
+
     @property
     def language(self):
         return self.store.get_language()
@@ -97,7 +110,7 @@ class WeighingMachineApp:
             except AttributeError:
                 elapsed = now - self.lock_time
             
-            if elapsed < config.STABLE_FREEZE_MS:
+            if elapsed < self.runtime_stable_freeze_ms:
                 # Still frozen - return locked weight
                 self.status_key = "locked"
                 return self.locked_weight
@@ -113,7 +126,7 @@ class WeighingMachineApp:
         
         if stability == "stable":
             self.stable_count += 1
-            if self.stable_count >= config.STABLE_LOCK_COUNT:
+            if self.stable_count >= self.runtime_stable_lock_count:
                 # Lock the weight
                 self.locked_weight = self.current_weight
                 self.lock_time = now
@@ -161,7 +174,8 @@ class WeighingMachineApp:
         self.temp_g = config.DEFAULT_G_VALUE
 
     def start_edit_name(self):
-        current = self.active_profile()["name"].ljust(config.PROFILE_NAME_LENGTH)
+        name = str(self.active_profile()["name"])
+        current = (name + (" " * config.PROFILE_NAME_LENGTH))[: config.PROFILE_NAME_LENGTH]
         self.create_mode = False
         self.state = "edit_name"
         self.name_buffer = list(current[: config.PROFILE_NAME_LENGTH])
@@ -177,6 +191,23 @@ class WeighingMachineApp:
         key = self.menu_keys[self.menu_index]
         if key == "back":
             self.state = "live"
+        elif key == "recalibration":
+            self.start_calibration()
+        elif key == "display_calibration":
+            self.state = "display_calibration"
+        elif key == "edit_config":
+            self.state = "edit_config"
+            self.config_edit_index = 0
+        elif key == "reset_config":
+            self.reset_configuration()
+        elif key == "language":
+            self.state = "language_menu"
+            self.language_menu_index = 1 if len(self.language_menu_keys) > 1 else 0
+
+    def activate_profile_menu(self):
+        key = self.profile_menu_keys[self.profile_menu_index]
+        if key == "back":
+            self.state = "live"
         elif key == "select_profile":
             self.start_profile_select()
         elif key == "create_profile":
@@ -187,13 +218,20 @@ class WeighingMachineApp:
             self.start_edit_g()
         elif key == "delete_profile":
             self.start_delete_profile()
-        elif key == "calibrate":
-            self.start_calibration()
-        elif key == "language":
-            self.toggle_language()
+
+    def activate_language_menu(self):
+        key = self.language_menu_keys[self.language_menu_index]
+        if key == "back":
+            self.state = "menu"
+        elif key == "english":
+            self.store.set_language("en")
+            self.status_key = "saved"
+            self.buzzer.beep()
             self.state = "live"
-        elif key == "buzzer_test":
-            self.buzzer.warning_beep()
+        elif key == "hindi":
+            self.store.set_language("hi")
+            self.status_key = "saved"
+            self.buzzer.beep()
             self.state = "live"
 
     def start_profile_select(self):
@@ -217,7 +255,7 @@ class WeighingMachineApp:
 
         # First item is back navigation
         if self.profile_list_index == 0:
-            self.state = "live"
+            self.state = "profile_menu"
             self.buzzer.beep()
             return
 
@@ -245,6 +283,18 @@ class WeighingMachineApp:
         except ValueError:
             self.status_key = "error"
             self.buzzer.warning_beep()
+        self.state = "live"
+
+    def reset_configuration(self):
+        """Reset profiles, calibration, and runtime config to defaults."""
+        self.store.save(self.store.default_data())
+        save_calibration(config.DEFAULT_TARE_OFFSET, config.DEFAULT_SCALE_FACTOR)
+        self.runtime_stable_lock_count = config.STABLE_LOCK_COUNT
+        self.runtime_stable_freeze_ms = config.STABLE_FREEZE_MS
+        self.locked_weight = None
+        self.stable_count = 0
+        self.status_key = "saved"
+        self.buzzer.double_beep()
         self.state = "live"
 
     def start_calibration(self):
@@ -383,10 +433,18 @@ class WeighingMachineApp:
                 self._handle_live_event(event)
             elif self.state == "menu":
                 self._handle_menu_event(event)
+            elif self.state == "profile_menu":
+                self._handle_profile_menu_event(event)
+            elif self.state == "language_menu":
+                self._handle_language_menu_event(event)
             elif self.state == "edit_name":
                 self._handle_name_event(event)
             elif self.state == "edit_g":
                 self._handle_g_event(event)
+            elif self.state == "display_calibration":
+                self._handle_display_calibration_event(event)
+            elif self.state == "edit_config":
+                self._handle_edit_config_event(event)
             elif self.state == "select_profile":
                 self._handle_profile_select_event(event)
             elif self.state == "confirm_delete":
@@ -413,11 +471,12 @@ class WeighingMachineApp:
             action = config.DEFAULT_ACTIONS[self.action_index]
             if action == "menu":
                 self.state = "menu"
-                self.menu_index = 0
+                self.menu_index = 1 if len(self.menu_keys) > 1 else 0
             elif action == "tare":
                 self.tare_scale()
             elif action == "profile":
-                self.start_profile_select()
+                self.state = "profile_menu"
+                self.profile_menu_index = 1 if len(self.profile_menu_keys) > 1 else 0
             elif action == "send":
                 self.send_record()
 
@@ -432,6 +491,30 @@ class WeighingMachineApp:
             self.activate_menu()
         elif event == "long":
             self.state = "live"
+
+    def _handle_profile_menu_event(self, event):
+        if event == "cw":
+            self.profile_menu_index = (self.profile_menu_index - 1) % len(self.profile_menu_keys)
+            self.buzzer.beep(20)
+        elif event == "ccw":
+            self.profile_menu_index = (self.profile_menu_index + 1) % len(self.profile_menu_keys)
+            self.buzzer.beep(20)
+        elif event == "click":
+            self.activate_profile_menu()
+        elif event == "long":
+            self.state = "live"
+
+    def _handle_language_menu_event(self, event):
+        if event == "cw":
+            self.language_menu_index = (self.language_menu_index - 1) % len(self.language_menu_keys)
+            self.buzzer.beep(20)
+        elif event == "ccw":
+            self.language_menu_index = (self.language_menu_index + 1) % len(self.language_menu_keys)
+            self.buzzer.beep(20)
+        elif event == "click":
+            self.activate_language_menu()
+        elif event == "long":
+            self.state = "menu"
 
     def _handle_name_event(self, event):
         if event == "cw":
@@ -456,6 +539,30 @@ class WeighingMachineApp:
         elif event == "long":
             self.state = "live"
 
+    def _handle_display_calibration_event(self, event):
+        if event in ("click", "long"):
+            self.state = "menu"
+
+    def _handle_edit_config_event(self, event):
+        if event == "cw":
+            if self.config_edit_index == 0:
+                self.runtime_stable_lock_count = max(1, self.runtime_stable_lock_count - 1)
+            else:
+                self.runtime_stable_freeze_ms = max(1000, self.runtime_stable_freeze_ms - 500)
+            self.buzzer.beep(20)
+        elif event == "ccw":
+            if self.config_edit_index == 0:
+                self.runtime_stable_lock_count = min(20, self.runtime_stable_lock_count + 1)
+            else:
+                self.runtime_stable_freeze_ms = min(20000, self.runtime_stable_freeze_ms + 500)
+            self.buzzer.beep(20)
+        elif event == "click":
+            self.config_edit_index = (self.config_edit_index + 1) % 2
+            self.buzzer.beep(20)
+        elif event == "long":
+            self.status_key = "saved"
+            self.state = "menu"
+
     def _handle_profile_select_event(self, event):
         total_items = len(self.profile_menu_items)
         if total_items == 0:
@@ -470,7 +577,7 @@ class WeighingMachineApp:
         elif event == "click":
             self.select_profile_at_index()
         elif event == "long":
-            self.state = "live"
+            self.state = "profile_menu"
 
     def _handle_delete_event(self, event):
         if event == "cw" or event == "ccw":
@@ -558,6 +665,12 @@ class WeighingMachineApp:
         elif self.state == "menu":
             items = [tr(language, key) for key in self.menu_keys]
             self.ui.draw_menu(language, items, self.menu_index)
+        elif self.state == "profile_menu":
+            items = [tr(language, key) for key in self.profile_menu_keys]
+            self.ui.draw_menu(language, items, self.profile_menu_index, title_key="profiles")
+        elif self.state == "language_menu":
+            items = [tr(language, key) for key in self.language_menu_keys]
+            self.ui.draw_menu(language, items, self.language_menu_index, title_key="language")
         elif self.state == "edit_name":
             self.ui.draw_message(
                 language,
@@ -571,6 +684,30 @@ class WeighingMachineApp:
                 tr(language, "edit_g"),
                 "%.1f m/s2" % self.temp_g,
                 "Click Save",
+            )
+        elif self.state == "display_calibration":
+            cal_offset, cal_scale = load_calibration()
+            line1 = "Off:%d Sf:%d" % (int(cal_offset), int(cal_scale))
+            self.ui.draw_message(
+                language,
+                tr(language, "display_calibration"),
+                line1[:18],
+                tr(language, "display_calibration_hint2"),
+            )
+        elif self.state == "edit_config":
+            lock_marker = "*" if self.config_edit_index == 0 else " "
+            freeze_marker = "*" if self.config_edit_index == 1 else " "
+            line1 = "L%s:%d F%s:%d" % (
+                lock_marker,
+                self.runtime_stable_lock_count,
+                freeze_marker,
+                self.runtime_stable_freeze_ms,
+            )
+            self.ui.draw_message(
+                language,
+                tr(language, "edit_config"),
+                line1,
+                tr(language, "config_edit_hint"),
             )
         elif self.state == "select_profile":
             self.ui.draw_profile_list(language, self.profile_menu_items, self.profile_list_index)
@@ -602,8 +739,11 @@ class WeighingMachineApp:
             "Keep scale empty",
         )
         
-        # Fill history with readings first
+        # Fill history with readings first (keep input responsive).
         for _ in range(config.STABLE_WINDOW + 2):
+            pending = self.encoder.poll()
+            if pending:
+                self.handle_events(pending)
             self.scale.read_filtered_kg()
             time.sleep(config.MAIN_LOOP_DELAY_MS / 1000.0)
         
@@ -611,6 +751,9 @@ class WeighingMachineApp:
         wait_interval = 100  # ms
         max_iterations = config.AUTO_TARE_TIMEOUT_MS // wait_interval
         for _ in range(max_iterations):
+            pending = self.encoder.poll()
+            if pending:
+                self.handle_events(pending)
             self.scale.read_filtered_kg()
             if self.scale.stability_level() == "stable":
                 break
@@ -627,9 +770,15 @@ class WeighingMachineApp:
         self.auto_tare_on_startup()
         count = 0
         while True:
-            self.handle_events(self.encoder.poll())
+            # High-priority input servicing: drain interrupt queue before rendering.
+            pending = self.encoder.poll()
+            while pending:
+                self.handle_events(pending)
+                pending = self.encoder.poll()
             self.render()
-            time.sleep(config.MAIN_LOOP_DELAY_MS / 1000.0)
+            # If new events arrived during render, loop immediately.
+            if not self.encoder.has_pending_events():
+                time.sleep(config.MAIN_LOOP_DELAY_MS / 1000.0)
             count += 1
             if iterations is not None and count >= iterations:
                 break

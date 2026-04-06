@@ -286,7 +286,7 @@ class DisplayUI:
         widths = []
         if num_actions == 3 and "profile" in DEFAULT_ACTIONS:
             profile_idx = DEFAULT_ACTIONS.index("profile")
-            profile_w = 64  # 7 chars * 8px + breathing room
+            profile_w = 72  # Extra room so selected box fully contains "Profile"
             other_total = bar_width - profile_w
             base_other = other_total // 2
             widths = [base_other, base_other, base_other]
@@ -324,6 +324,47 @@ class DisplayUI:
                 self.display.text(label, text_x, bar_y + 10, color)
             x += btn_w + gap
 
+    def _wrap_menu_text(self, text, max_chars, max_lines=2):
+        """Wrap menu text to multiple lines with word-wrap and char fallback."""
+        text = str(text or "")
+        if max_chars <= 0:
+            return [""]
+        if len(text) <= max_chars:
+            return [text]
+
+        words = text.split(" ")
+        lines = []
+        current = ""
+
+        for word in words:
+            # Break very long words at character boundaries.
+            while len(word) > max_chars:
+                if current:
+                    lines.append(current)
+                    current = ""
+                    if len(lines) >= max_lines:
+                        return lines[:max_lines]
+                lines.append(word[:max_chars])
+                word = word[max_chars:]
+                if len(lines) >= max_lines:
+                    return lines[:max_lines]
+
+            candidate = word if not current else (current + " " + word)
+            if len(candidate) <= max_chars:
+                current = candidate
+            else:
+                lines.append(current)
+                current = word
+                if len(lines) >= max_lines:
+                    return lines[:max_lines]
+
+        if current and len(lines) < max_lines:
+            lines.append(current)
+
+        if not lines:
+            lines = [text[:max_chars]]
+        return lines[:max_lines]
+
     def draw_menu(self, language, items, selected_index, title_key="menu"):
         self._clear()
         
@@ -332,34 +373,43 @@ class DisplayUI:
         self._draw_icon_menu(4, 2, self.ACCENT)
         self.display.text(tr(language, title_key), 22, 3, self.FG)
         
-        # Menu items (6 visible, 18px each = 108px, fits in 128-14=114px)
-        visible_items = 6
+        # Menu items with wrapped text (5 visible, 22px each)
+        row_h = 22
+        item_h = 20
+        visible_items = 5
         start_idx = max(0, min(selected_index - 2, len(items) - visible_items))
         
         for i, idx in enumerate(range(start_idx, min(start_idx + visible_items, len(items)))):
-            y = 18 + i * 18
+            y = 18 + i * row_h
             item = items[idx]
             is_selected = (idx == selected_index)
             is_back = (idx == 0)  # First item is always "Back"
+            text_x = 22 if is_back else 18
+            max_chars = max(1, (self.w - 12 - text_x - 4) // 8)
+            wrapped = self._wrap_menu_text(item, max_chars, max_lines=2)
             
             if is_selected:
-                self.display.fill_rect(4, y, self.w - 12, 16, self.ACCENT_DIM)
-                self.display.rect(4, y, self.w - 12, 16, self.ACCENT)
+                self.display.fill_rect(4, y, self.w - 12, item_h, self.ACCENT_DIM)
+                self.display.rect(4, y, self.w - 12, item_h, self.ACCENT)
                 if is_back:
-                    self._draw_icon_back(8, y + 3, self.ACCENT)
+                    self._draw_icon_back(8, y + 5, self.ACCENT)
                 else:
-                    self.display.triangle(8, y + 4, 8, y + 12, 14, y + 8, self.ACCENT, filled=True)
-                self.display.text(item[:14], 22, y + 4, self.FG)
+                    self.display.triangle(8, y + 6, 8, y + 14, 14, y + 10, self.ACCENT, filled=True)
+                self.display.text(wrapped[0], text_x, y + 2, self.FG)
+                if len(wrapped) > 1:
+                    self.display.text(wrapped[1], text_x, y + 10, self.FG)
             else:
                 if is_back:
-                    self._draw_icon_back(8, y + 3, self.GRAY)
-                    self.display.text(item[:14], 22, y + 4, self.GRAY)
+                    self._draw_icon_back(8, y + 5, self.GRAY)
                 else:
-                    self.display.text(item[:16], 18, y + 4, self.GRAY)
+                    self.display.triangle(8, y + 6, 8, y + 14, 14, y + 10, self.GRAY, filled=True)
+                self.display.text(wrapped[0], text_x, y + 2, self.GRAY)
+                if len(wrapped) > 1:
+                    self.display.text(wrapped[1], text_x, y + 10, self.GRAY)
         
         # Scroll indicator
         if len(items) > visible_items:
-            list_h = visible_items * 18
+            list_h = visible_items * row_h
             bar_h = max(10, (list_h * visible_items) // len(items))
             bar_y = 18 + (selected_index * (list_h - bar_h)) // max(1, len(items) - 1)
             self.display.fill_rect(self.w - 4, 18, 2, list_h, self.GRAY)
@@ -376,32 +426,43 @@ class DisplayUI:
         self._draw_icon_profile(4, 1, self.ACCENT)
         self.display.text(tr(language, "select_profile"), 22, 3, self.FG)
         
-        # Profile list with back option as first item
-        visible_items = 6
+        # Profile list with back option as first item and wrapped text
+        row_h = 22
+        item_h = 20
+        visible_items = 4
         start_idx = max(0, min(selected_index - 2, len(items) - visible_items))
         
         for i, idx in enumerate(range(start_idx, min(start_idx + visible_items, len(items)))):
-            y = 18 + i * 18
+            y = 18 + i * row_h
             is_back = (idx == 0 and items[idx] == "__back__")
             name = tr(language, "back") if is_back else items[idx]
             is_selected = (idx == selected_index)
+            text_x = 22 if is_back else 18
+            max_chars = max(1, (self.w - 12 - text_x - 4) // 8)
+            wrapped = self._wrap_menu_text(name, max_chars, max_lines=2)
             
             if is_selected:
-                self.display.fill_rect(4, y, self.w - 12, 16, self.ACCENT_DIM)
-                self.display.rect(4, y, self.w - 12, 16, self.ACCENT)
+                self.display.fill_rect(4, y, self.w - 12, item_h, self.ACCENT_DIM)
+                self.display.rect(4, y, self.w - 12, item_h, self.ACCENT)
                 if is_back:
-                    self._draw_icon_back(8, y + 3, self.ACCENT)
+                    self._draw_icon_back(8, y + 5, self.ACCENT)
                 else:
-                    self.display.triangle(8, y + 4, 8, y + 12, 14, y + 8, self.ACCENT, filled=True)
-                self.display.text(name[:14], 22, y + 4, self.FG)
+                    self.display.triangle(8, y + 6, 8, y + 14, 14, y + 10, self.ACCENT, filled=True)
+                self.display.text(wrapped[0], text_x, y + 2, self.FG)
+                if len(wrapped) > 1:
+                    self.display.text(wrapped[1], text_x, y + 10, self.FG)
             else:
                 if is_back:
-                    self._draw_icon_back(8, y + 3, self.GRAY)
-                self.display.text(name[:14], 22, y + 4, self.GRAY)
+                    self._draw_icon_back(8, y + 5, self.GRAY)
+                else:
+                    self.display.triangle(8, y + 6, 8, y + 14, 14, y + 10, self.GRAY, filled=True)
+                self.display.text(wrapped[0], text_x, y + 2, self.GRAY)
+                if len(wrapped) > 1:
+                    self.display.text(wrapped[1], text_x, y + 10, self.GRAY)
         
         # Scroll indicator
         if len(items) > visible_items:
-            list_h = visible_items * 18
+            list_h = visible_items * row_h
             bar_h = max(10, (list_h * visible_items) // len(items))
             bar_y = 18 + (selected_index * (list_h - bar_h)) // max(1, len(items) - 1)
             self.display.fill_rect(self.w - 4, 18, 2, list_h, self.GRAY)
