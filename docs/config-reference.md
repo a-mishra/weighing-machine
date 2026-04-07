@@ -209,3 +209,31 @@ Not critical for local weighing functionality.
 
 Always recalibrate after major sensor/filter tuning.
 
+---
+
+## 13) ASCII Signal and Tuning Diagram
+
+```text
+Load Cell -> HX711 raw -> tare remove -> scale convert -> base_mass
+                                                  |
+                                                  v
+                                            EMA/filtering
+                                                  |
+                                                  v
+                                        multiply by profile g
+                                                  |
+                                                  v
+                                           displayed weight
+```
+
+```text
+Tuning knobs (practical effect)
+----------------------------------------------
+HX711_SAMPLES    : smoothness vs speed
+EMA_ALPHA        : responsiveness vs damping
+STABLE_WINDOW    : stability confidence vs delay
+UI_REDRAW_MS     : CPU load vs UI refresh feel
+STABLE_FREEZE_MS : readability vs update immediacy
+----------------------------------------------
+```
+

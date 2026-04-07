@@ -423,3 +423,59 @@ Although current validation is mostly manual (hardware-in-loop), automation can 
 
 This reduces risk when tuning constants (sampling window, thresholds, redraw period).
 
+---
+
+## 11) ASCII Diagrams
+
+### 11.1 Live Screen Region Layout
+
+```text
++--------------------------------------------------------------+
+| [Title]                                  [Status LED]       |
++--------------------------------------------------------------+
+|                      LARGE WEIGHT                            |
+|                         12.34 kg                             |
+|                      Stable/Locked text                      |
++--------------------------------------------------------------+
+| Profile: Earth             g=9.8                             |
+| Status message                                              |
++--------------------------------------------------------------+
+|   [Tare]                 [Profile]                 [Menu]    |
++--------------------------------------------------------------+
+```
+
+### 11.2 Main Navigation Flow
+
+```text
+LIVE
+ | click(Menu)
+ v
+MENU ----> LANGUAGE MENU
+ |             |
+ |             +--> select language --> LIVE
+ |
+ +--> RECALIBRATION --> CAL WIZARD --> LIVE
+
+LIVE
+ | click(Profile)
+ v
+PROFILE MENU --> SELECT/CREATE/EDIT/DELETE --> LIVE
+```
+
+### 11.3 Calibration Wizard Flow
+
+```text
+[cal_tare]
+    |
+    v
+[cal_place] --> [cal_input] --> [save point]
+                                |
+                                v
+                           [cal_confirm]
+                           /         \
+                      add more       finish
+                        |              |
+                        v              v
+                    cal_place       cal_done -> live
+```
+

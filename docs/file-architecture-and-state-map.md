@@ -200,3 +200,53 @@ When adding new features:
 5. Add persistence changes in `profiles.py`/`scale.py` if needed
 6. Update test-case docs
 
+---
+
+## 10) ASCII Diagrams
+
+### 10.1 Module Dependency View
+
+```text
+                +------------------+
+                |     main.py      |
+                +----+---+---+-----+
+                     |   |   |
+                     |   |   +------------------+
+                     |   |                      |
+                     v   v                      v
+            +--------+   +----------+   +------+------+
+            | encoder|   |  scale   |   | display_ui  |
+            +--------+   +----------+   +------+------+
+                |            |                 |
+                |            v                 v
+                |       +----+----+       +----+----+
+                |       | hx711   |       | st7735  |
+                |       +---------+       +---------+
+                |
+                v
+          +-----+------+
+          | profiles   |
+          |  + lang    |
+          +------------+
+```
+
+### 10.2 State Transition (Compact)
+
+```text
+live
+ |-menu--------> menu ----------> language_menu ---> live
+ |               |
+ |               +-------------> cal_tare -> cal_place -> cal_input
+ |                                               ^            |
+ |                                               |            v
+ |                                           cal_confirm <--- save point
+ |                                               |
+ |                                            cal_done -> live
+ |
+ +--profile----> profile_menu -> select_profile -> live
+                    |    |    \
+                    |    |     -> confirm_delete -> live
+                    |    -> edit_name -> edit_g -> live
+                    -> back -> live
+```
+

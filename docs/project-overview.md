@@ -140,3 +140,42 @@ This project demonstrates end-to-end embedded engineering:
 
 It is well-suited for a college minor project because it combines practical hardware integration with real software architecture decisions.
 
+---
+
+## 12) ASCII Diagrams
+
+### 12.1 High-Level System Block Diagram
+
+```text
+                +----------------------+
+                |   Rotary Encoder     |
+                | (CW/CCW + Click SW)  |
+                +----------+-----------+
+                           |
+                           v
++-----------+     +--------+---------+      +------------------+
+|  Load Cell |---->|   HX711 ADC     |----->|   Scale Logic     |
++-----------+     +------------------+      |  (filter/stable)  |
+                                             +---------+--------+
+                                                       |
+                                                       v
+                                             +---------+--------+
+                                             |   App State      |
+                                             |   Machine        |
+                                             +----+--------+----+
+                                                  |        |
+                                                  |        +-------------------+
+                                                  v                            v
+                                       +----------+---------+      +-----------+-----------+
+                                       |   TFT UI Renderer  |      |  JSON Persistence     |
+                                       |      ST7735        |      | profiles/calibration  |
+                                       +--------------------+      +-----------------------+
+```
+
+### 12.2 Data Model (Base Mass + Profile Gravity)
+
+```text
+Raw ADC --> (raw - tare_offset) / scale_factor --> base_mass(g=1)
+base_mass * profile_g --> displayed_weight
+```
+

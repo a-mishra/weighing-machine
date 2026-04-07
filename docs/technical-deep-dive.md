@@ -267,3 +267,59 @@ The project is already a strong embedded system implementation with clear modula
 
 Its architecture is suitable for academic demonstration and can be further productized with incremental performance and testability improvements.
 
+---
+
+## 15) ASCII Diagrams
+
+### 15.1 Runtime Loop Priority
+
+```text
+while True:
+   poll encoder IRQ queue
+      |
+      +--> if events: handle_events()
+      |
+   check render timer
+      |
+      +--> render if (had_events OR redraw_timeout)
+      |
+   sleep only if no pending input
+```
+
+### 15.2 ISR-Safe Input Pipeline
+
+```text
+GPIO IRQ / Rotary callback
+          |
+          v
+  +-----------------------+
+  | compact event storage |
+  | ring + pending delta  |
+  +-----------+-----------+
+              |
+              v
+         poll() in main loop
+              |
+              v
+    expanded events: cw/ccw/click/long
+              |
+              v
+        state-specific handlers
+```
+
+### 15.3 Calibration Fit Path
+
+```text
+Empty scale  --> capture tare_offset
+Known loads  --> capture (raw_i, weight_i)
+                 |
+                 v
+         convert weight_i to base_mass_i
+                 |
+                 v
+ scale_factor = sum(base_mass_i * (raw_i - tare)) / sum(base_mass_i^2)
+                 |
+                 v
+ save offset + scale_factor --> calibration.json
+```
+

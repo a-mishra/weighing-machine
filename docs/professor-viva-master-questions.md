@@ -285,3 +285,28 @@ These questions show engineering prioritization thinking.
 
 "This project demonstrates complete embedded product thinking: sensor interfacing, signal conditioning, user interaction design, deterministic state control, persistence, debugging under constraints, and measurable validation. I focused on making it accurate, usable, and explainable."
 
+---
+
+## 18) ASCII Diagrams for Oral Explanation
+
+### 18.1 10-Second Architecture Sketch
+
+```text
+Load Cell -> HX711 -> Scale Math/Filter -> State Machine -> TFT UI
+                     ^                      ^
+                     |                      |
+                 calibration.json       Encoder IRQ events
+                     |
+                 profiles.json (g, language)
+```
+
+### 18.2 Calibration Story Sketch
+
+```text
+Empty -> tare capture
+Known weights -> point capture
+Points -> least-squares slope
+save(offset, scale_factor)
+verify with references
+```
+

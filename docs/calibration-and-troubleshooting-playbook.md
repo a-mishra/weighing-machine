@@ -174,3 +174,46 @@ Use this quick log per session:
 - Observed issues:
 - Final pass/fail:
 
+---
+
+## 8) ASCII Quick-Action Trees
+
+### 8.1 Calibration Decision Flow
+
+```text
+Start
+ |
+ +--> Empty stable? --no--> stabilize setup --> retry
+ |         |
+ |        yes
+ |         v
+ +--> Capture tare
+           |
+           v
+     Add known point(s)
+           |
+           v
+     >=2 good points? --no--> add more points
+           |
+          yes
+           v
+      Finish + Save
+           |
+           v
+      Verify known weights
+```
+
+### 8.2 Symptom Triage Flow
+
+```text
+Wrong output?
+ |
+ +--> Color wrong? ---------> run test_lcd_colors.py -> fix display path
+ |
+ +--> Input lag? -----------> check IRQ input + redraw interval
+ |
+ +--> Scale off by factor? -> check correction factor + recalibrate
+ |
+ +--> Drift/noise? ---------> check wiring/mechanics + tare + filtering
+```
+

@@ -128,3 +128,42 @@ If readings move negative/inverted under load:
 4. Run `test_lcd_colors.py` to confirm color channel mapping.
 5. Run calibration flow before final measurements.
 
+---
+
+## 8) ASCII Wiring Diagram (Quick View)
+
+```text
+                      Raspberry Pi Pico 2W
+               +----------------------------------+
+               | GP2  <----- HX711 DOUT           |
+               | GP3  -----> HX711 SCK            |
+               |                                  |
+               | GP18 -----> TFT SCK              |
+               | GP19 -----> TFT MOSI             |
+               | GP17 -----> TFT CS               |
+               | GP20 -----> TFT DC               |
+               | GP21 -----> TFT RST              |
+               | GP16 -----> TFT BL               |
+               |                                  |
+               | GP10 <-----> ENC CLK             |
+               | GP11 <-----> ENC DT              |
+               | GP12 <-----  ENC SW              |
+               |                                  |
+               | GP15 ----->  BUZZER SIG (opt)    |
+               |                                  |
+               | 3V3  -----> HX711/TFT/ENC VCC    |
+               | GND  -----  Common Ground        |
+               +----------------------------------+
+```
+
+### 8.1 Load Cell to HX711 (Typical)
+
+```text
+Load Cell             HX711
+---------             -----
+Red   --------------> E+
+Black --------------> E-
+Green --------------> A+
+White --------------> A-
+```
+
