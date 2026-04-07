@@ -108,6 +108,15 @@ class ScaleSensor:
     def read_raw(self):
         return self.adc.read_average(self.samples)
 
+    def read_raw_avg(self, count):
+        """Read and average raw ADC values over `count` conversions.
+
+        This calls HX711 `read_average(count)` directly, so callers do not
+        accidentally stack multiple averaging layers.
+        """
+        count = max(1, int(count))
+        return self.adc.read_average(count)
+
     def tare(self, samples=None):
         count = samples or self.samples
         self.offset = self.adc.read_average(count)

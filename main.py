@@ -34,9 +34,6 @@ class WeighingMachineApp:
         self.menu_keys = [
             "back",
             "recalibration",
-            "display_calibration",
-            "edit_config",
-            "reset_config",
             "language",
         ]
         self.profile_menu_keys = [
@@ -193,13 +190,6 @@ class WeighingMachineApp:
             self.state = "live"
         elif key == "recalibration":
             self.start_calibration()
-        elif key == "display_calibration":
-            self.state = "display_calibration"
-        elif key == "edit_config":
-            self.state = "edit_config"
-            self.config_edit_index = 0
-        elif key == "reset_config":
-            self.reset_configuration()
         elif key == "language":
             self.state = "language_menu"
             self.language_menu_index = 1 if len(self.language_menu_keys) > 1 else 0
@@ -314,12 +304,8 @@ class WeighingMachineApp:
         return self.cal_raw
 
     def _read_cal_raw_avg(self):
-        """Average a few raw readings to reduce calibration noise."""
-        count = max(1, int(config.CALIBRATE_RAW_AVG_COUNT))
-        total = 0
-        for _ in range(count):
-            total += self.scale.read_raw()
-        return total / float(count)
+        """Average calibration raw values via scale API (single averaging layer)."""
+        return self.scale.read_raw_avg(config.CALIBRATE_RAW_AVG_COUNT)
 
     def _save_cal_tare(self):
         """Save tare offset during calibration."""
@@ -451,10 +437,6 @@ class WeighingMachineApp:
                 self._handle_name_event(event)
             elif self.state == "edit_g":
                 self._handle_g_event(event)
-            elif self.state == "display_calibration":
-                self._handle_display_calibration_event(event)
-            elif self.state == "edit_config":
-                self._handle_edit_config_event(event)
             elif self.state == "select_profile":
                 self._handle_profile_select_event(event)
             elif self.state == "confirm_delete":
@@ -694,30 +676,6 @@ class WeighingMachineApp:
                 tr(language, "edit_g"),
                 "%.1f m/s2" % self.temp_g,
                 "Click Save",
-            )
-        elif self.state == "display_calibration":
-            cal_offset, cal_scale = load_calibration()
-            line1 = "Off:%d Sf:%d" % (int(cal_offset), int(cal_scale))
-            self.ui.draw_message(
-                language,
-                tr(language, "display_calibration"),
-                line1[:18],
-                tr(language, "display_calibration_hint2"),
-            )
-        elif self.state == "edit_config":
-            lock_marker = "*" if self.config_edit_index == 0 else " "
-            freeze_marker = "*" if self.config_edit_index == 1 else " "
-            line1 = "L%s:%d F%s:%d" % (
-                lock_marker,
-                self.runtime_stable_lock_count,
-                freeze_marker,
-                self.runtime_stable_freeze_ms,
-            )
-            self.ui.draw_message(
-                language,
-                tr(language, "edit_config"),
-                line1,
-                tr(language, "config_edit_hint"),
             )
         elif self.state == "select_profile":
             self.ui.draw_profile_list(language, self.profile_menu_items, self.profile_list_index)
