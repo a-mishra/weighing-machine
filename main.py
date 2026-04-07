@@ -309,19 +309,27 @@ class WeighingMachineApp:
         self.buzzer.beep()
 
     def _read_cal_raw(self):
-        """Read raw sensor value for calibration."""
-        self.cal_raw = self.scale.read_raw()
+        """Read averaged raw sensor value for calibration display."""
+        self.cal_raw = self._read_cal_raw_avg()
         return self.cal_raw
+
+    def _read_cal_raw_avg(self):
+        """Average a few raw readings to reduce calibration noise."""
+        count = max(1, int(config.CALIBRATE_RAW_AVG_COUNT))
+        total = 0
+        for _ in range(count):
+            total += self.scale.read_raw()
+        return total / float(count)
 
     def _save_cal_tare(self):
         """Save tare offset during calibration."""
-        self.cal_tare_offset = self.scale.read_raw()
+        self.cal_tare_offset = self._read_cal_raw_avg()
         self.state = "cal_place"
         self.buzzer.beep()
 
     def _save_cal_point(self):
         """Save current calibration point."""
-        raw = self.scale.read_raw()
+        raw = self._read_cal_raw_avg()
         self.cal_points.append((raw, self.cal_weight))
         self.cal_option = 0
         self.state = "cal_confirm"
@@ -343,24 +351,26 @@ class WeighingMachineApp:
         if not self.cal_points:
             self.state = "live"
             return
-        
-        total_factor = 0
-        valid_points = 0
+
+        # Least-squares slope with tare offset fixed:
+        #   raw - tare = scale_factor * base_mass
+        sum_mr = 0.0
+        sum_mm = 0.0
         for raw, weight in self.cal_points:
             # Convert entered profile-based weight to g=1 base mass.
             # Example on Earth profile (g=9.8): 5.00 shown weight -> 0.5102 base mass.
             base_mass = weight / self.cal_profile_g if self.cal_profile_g else 0
             if base_mass > 0:
-                factor = (raw - self.cal_tare_offset) / base_mass
-                total_factor += factor
-                valid_points += 1
+                raw_delta = raw - self.cal_tare_offset
+                sum_mr += base_mass * raw_delta
+                sum_mm += base_mass * base_mass
 
-        if valid_points == 0:
+        if sum_mm <= 0:
             self.state = "live"
             self.buzzer.warning_beep()
             return
 
-        new_scale_factor = total_factor / valid_points
+        new_scale_factor = sum_mr / sum_mm
         self.scale.scale_factor = new_scale_factor
         self.scale.offset = self.cal_tare_offset
         
@@ -769,14 +779,27 @@ class WeighingMachineApp:
         time.sleep(config.SPLASH_MS / 1000.0)
         self.auto_tare_on_startup()
         count = 0
+        last_render_ms = 0
         while True:
             # High-priority input servicing: drain interrupt queue before rendering.
+            had_events = False
             pending = self.encoder.poll()
             while pending:
+                had_events = True
                 self.handle_events(pending)
                 pending = self.encoder.poll()
-            self.render()
-            # If new events arrived during render, loop immediately.
+            now = self._get_time_ms()
+            try:
+                elapsed_since_render = time.ticks_diff(now, last_render_ms)
+            except AttributeError:
+                elapsed_since_render = now - last_render_ms
+
+            # Redraw only on user input or periodic UI refresh.
+            if had_events or elapsed_since_render >= config.UI_REDRAW_MS:
+                self.render()
+                last_render_ms = now
+
+            # If new events arrived, loop immediately; otherwise short sleep.
             if not self.encoder.has_pending_events():
                 time.sleep(config.MAIN_LOOP_DELAY_MS / 1000.0)
             count += 1

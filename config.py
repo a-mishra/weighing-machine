@@ -14,11 +14,11 @@ CALIBRATION_FILE = "calibration.json"
 # HX711 and load-cell wiring.
 HX711_DATA_PIN = 2
 HX711_SCK_PIN = 3
-HX711_SAMPLES = 8
+HX711_SAMPLES = 12
 HX711_GAIN = 128
 DEFAULT_TARE_OFFSET = 0
 DEFAULT_SCALE_FACTOR = 1000.0
-WEIGHT_CORRECTION_FACTOR = 0.25  # Multiply final weight by this (0.25 = divide by 4)
+WEIGHT_CORRECTION_FACTOR = 1.0   # Keep 1.0 with calibrated systems (avoid extra scaling bias)
 WEIGHT_DECIMALS = 2
 STABLE_WINDOW = 4               # Readings to keep in history (fewer = faster)
 STABLE_TOLERANCE_KG = 0.10      # Green: very stable
@@ -32,6 +32,7 @@ AUTO_TARE_TIMEOUT_MS = 5000     # Max wait for stable reading during auto-tare
 CALIBRATE_WEIGHT_STEP = 0.05       # 50 grams normal step
 CALIBRATE_WEIGHT_STEP_FAST = 0.5   # 500 grams fast step
 CALIBRATE_FAST_THRESHOLD_MS = 100  # Time between rotations to trigger fast mode
+CALIBRATE_RAW_AVG_COUNT = 12       # Average raw samples during calibration
 CALIBRATE_WEIGHT_MIN = 0.05
 CALIBRATE_WEIGHT_MAX = 50.0
 CALIBRATE_DEFAULT_WEIGHT = 0.5
@@ -68,6 +69,7 @@ CLOUD_TIMEOUT_SECONDS = 10
 # UI.
 SPLASH_MS = 1200
 MAIN_LOOP_DELAY_MS = 30
+UI_REDRAW_MS = 500
 PROFILE_NAME_LENGTH = 10
 PROFILE_NAME_CHARSET = " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
 DEFAULT_ACTIONS = ("tare", "profile", "menu")

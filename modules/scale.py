@@ -139,21 +139,14 @@ class ScaleSensor:
         return value
 
     def read_filtered_kg(self):
-        """Get the best filtered weight value using median + EMA."""
-        self.read_kg()
-        
-        if len(self._history) < 3:
-            return round(self._ema_value or 0.0, WEIGHT_DECIMALS)
-        
-        # Use median to reject outliers, then blend with EMA for smoothness
-        median_val = self.math.median(self._history)
-        if self._ema_value is not None:
-            # Weighted blend: 60% median (outlier rejection), 40% EMA (smoothness)
-            blended = 0.6 * median_val + 0.4 * self._ema_value
-        else:
-            blended = median_val
-        
-        return round(blended, WEIGHT_DECIMALS)
+        """Get filtered weight value with lightweight EMA-only filtering.
+
+        This avoids median sorting each loop and reduces CPU usage on Pico.
+        """
+        latest = self.read_kg()
+        if self._ema_value is None:
+            return round(latest, WEIGHT_DECIMALS)
+        return round(self._ema_value, WEIGHT_DECIMALS)
 
     def get_moving_average(self):
         """Get simple moving average of history."""
