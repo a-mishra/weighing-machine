@@ -5,6 +5,11 @@ try:
 except ImportError:  # pragma: no cover - CPython fallback
     import json
 
+try:
+    import os
+except ImportError:  # pragma: no cover
+    os = None
+
 from config import (
     CALIBRATION_FILE,
     DEFAULT_SCALE_FACTOR,
@@ -17,6 +22,22 @@ from config import (
     WEIGHT_CORRECTION_FACTOR,
     WEIGHT_DECIMALS,
 )
+
+
+def _ensure_parent_dir(path):
+    if os is None or not path:
+        return
+    slash = path.rfind("/")
+    backslash = path.rfind("\\")
+    idx = slash if slash > backslash else backslash
+    if idx <= 0:
+        return
+    parent = path[:idx]
+    if hasattr(os, "mkdir"):
+        try:
+            os.mkdir(parent)
+        except OSError:
+            pass
 
 
 def load_calibration():
@@ -38,6 +59,7 @@ def save_calibration(offset, scale_factor):
     base_g is stored for clarity/debugging: all scale factors are g=1 based.
     """
     data = {"offset": offset, "scale_factor": scale_factor, "base_g": 1.0}
+    _ensure_parent_dir(CALIBRATION_FILE)
     with open(CALIBRATION_FILE, "w") as f:
         json.dump(data, f)
 

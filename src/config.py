@@ -1,6 +1,11 @@
 """Shared configuration for the Pico 2W weighing machine."""
 
 try:
+    import os
+except ImportError:  # pragma: no cover
+    os = None
+
+try:
     _THIS_FILE = __file__
 except NameError:
     _THIS_FILE = ""
@@ -14,6 +19,8 @@ def _dirname(path):
     idx = slash if slash > backslash else backslash
     if idx < 0:
         return ""
+    if idx == 0:
+        return path[:1]
     return path[:idx]
 
 
@@ -26,10 +33,26 @@ def _join(dir_path, name):
 
 
 _SRC_DIR = _dirname(_THIS_FILE)
+_ROOT_DIR = _dirname(_SRC_DIR)
+
+if _THIS_FILE.startswith("/src/") or _SRC_DIR == "/src":
+    DATA_DIR = "/data"
+else:
+    DATA_DIR = _join(_ROOT_DIR, "data")
 
 
 def _data_file(name):
-    return _join(_SRC_DIR, name)
+    return _join(DATA_DIR, name)
+
+
+def ensure_data_dir():
+    if os is None or not DATA_DIR:
+        return
+    if hasattr(os, "mkdir"):
+        try:
+            os.mkdir(DATA_DIR)
+        except OSError:
+            pass
 
 
 DEFAULT_LANGUAGE = "en"  # default: "en" | initial UI language
@@ -40,8 +63,8 @@ MIN_G_VALUE = 1.0  # default: 1.0 | minimum editable gravity
 MAX_G_VALUE = 50.0  # default: 50.0 | maximum editable gravity
 G_STEP = 0.1  # default: 0.1 | gravity edit increment
 
-PROFILE_FILE = _data_file("profiles.json")  # profile storage (under src/)
-CALIBRATION_FILE = _data_file("calibration.json")  # calibration storage (under src/)
+PROFILE_FILE = _data_file("profiles.json")  # profile storage (under data/)
+CALIBRATION_FILE = _data_file("calibration.json")  # calibration storage (under data/)
 
 # HX711 and load-cell wiring.
 HX711_DATA_PIN = 2  # default: 2 | HX711 DOUT GPIO
@@ -102,12 +125,6 @@ LED_LOCK_WARNING_BLINK_MS = 200  # default: 200 | lock-ending blink period
 BUZZER_PIN = 15  # default: 15 | buzzer GPIO
 BUZZER_ACTIVE_HIGH = True  # default: True | buzzer on when GPIO is high
 BUZZER_FREQUENCY = 2400  # default: 2400 | unused for active buzzer (kept for API compat)
-
-# Wi-Fi and cloud.
-WIFI_SSID = "YOUR_WIFI_SSID"  # default: "YOUR_WIFI_SSID" | Wi-Fi SSID
-WIFI_PASSWORD = "YOUR_WIFI_PASSWORD"  # default: "YOUR_WIFI_PASSWORD" | Wi-Fi password
-CLOUD_ENDPOINT = "http://httpbin.org/post"  # default: "http://httpbin.org/post" | upload endpoint
-CLOUD_TIMEOUT_SECONDS = 10  # default: 10 | cloud request timeout
 
 # UI.
 SPLASH_MS = 1000  # default: 1000 | splash screen duration

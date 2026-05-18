@@ -2,11 +2,15 @@
 
 import time
 
+try:
+    import gc  # type: ignore
+except ImportError:  # pragma: no cover
+    gc = None
+
 import config
 from drivers.st7735 import create_default_display
 from modules.buzzer import Buzzer
 from modules.status_leds import StatusLeds
-from modules.cloud import CloudClient, build_payload
 from modules.display_ui import DisplayUI
 from modules.encoder import RotaryEncoder
 from modules.lang import tr
@@ -19,14 +23,24 @@ except ImportError:  # pragma: no cover
     HX711 = None
 
 
+def _configure_gc():
+    if gc is None:
+        return
+    gc.collect()
+    if hasattr(gc, "threshold") and hasattr(gc, "mem_alloc") and hasattr(gc, "mem_free"):
+        try:
+            gc.threshold(gc.mem_alloc() + (gc.mem_free() // 4))
+        except Exception:
+            pass
+
+
 class WeighingMachineApp:
-    def __init__(self, store, scale, ui, encoder, buzzer, cloud, status_leds=None):
+    def __init__(self, store, scale, ui, encoder, buzzer, status_leds=None):
         self.store = store
         self.scale = scale
         self.ui = ui
         self.encoder = encoder
         self.buzzer = buzzer
-        self.cloud = cloud
         self.status_leds = status_leds
 
         self.state = "live"
@@ -80,13 +94,53 @@ class WeighingMachineApp:
         self.runtime_stable_lock_count = config.STABLE_LOCK_COUNT
         self.runtime_stable_freeze_ms = config.STABLE_FREEZE_MS
         self.config_edit_index = 0
+        self._menu_item_cache = {}
+        self._status_text_cache = {}
+        self._profiles = []
+        self._active_profile = {"name": "Earth", "g": config.DEFAULT_G_VALUE}
+        self._language = config.DEFAULT_LANGUAGE
+        self._reload_cached_settings()
 
     @property
     def language(self):
-        return self.store.get_language()
+        return self._language
 
     def active_profile(self):
-        return self.store.get_active_profile()
+        return self._active_profile
+
+    def _clear_text_caches(self):
+        self._menu_item_cache = {}
+        self._status_text_cache = {}
+
+    def _reload_cached_settings(self):
+        previous_language = self._language
+        data = self.store.load()
+        self._profiles = data.get("profiles", [])
+        self._language = data.get("language", config.DEFAULT_LANGUAGE)
+        active_name = data.get("active_profile", "")
+        self._active_profile = self._profiles[0] if self._profiles else {"name": "Earth", "g": config.DEFAULT_G_VALUE}
+        for item in self._profiles:
+            if item.get("name") == active_name:
+                self._active_profile = item
+                break
+        if previous_language != self._language:
+            self._clear_text_caches()
+
+    def _menu_items(self, keys):
+        cache_key = (self._language, tuple(keys))
+        items = self._menu_item_cache.get(cache_key)
+        if items is None:
+            items = [tr(self._language, key) for key in keys]
+            self._menu_item_cache[cache_key] = items
+        return items
+
+    def _status_text(self, key):
+        cache_key = (self._language, key)
+        value = self._status_text_cache.get(cache_key)
+        if value is None:
+            value = tr(self._language, key)
+            self._status_text_cache[cache_key] = value
+        return value
 
     def _get_time_ms(self):
         """Get current time in milliseconds."""
@@ -146,11 +200,11 @@ class WeighingMachineApp:
         self.buzzer.double_beep()
 
     def cycle_profile(self):
-        profiles = self.store.list_profiles()
         current = self.active_profile()["name"]
-        names = [item["name"] for item in profiles]
+        names = [item["name"] for item in self._profiles]
         idx = (names.index(current) + 1) % len(names)
         self.store.select_profile(names[idx])
+        self._reload_cached_settings()
         self.locked_weight = None
         self.stable_count = 0
         self.status_key = "saved"
@@ -159,6 +213,7 @@ class WeighingMachineApp:
     def toggle_language(self):
         new_language = "hi" if self.language == "en" else "en"
         self.store.set_language(new_language)
+        self._reload_cached_settings()
         self.status_key = "saved"
         self.buzzer.beep()
 
@@ -214,22 +269,23 @@ class WeighingMachineApp:
             self.state = "menu"
         elif key == "english":
             self.store.set_language("en")
+            self._reload_cached_settings()
             self.status_key = "saved"
             self.buzzer.beep()
             self.state = "live"
         elif key == "hindi":
             self.store.set_language("hi")
+            self._reload_cached_settings()
             self.status_key = "saved"
             self.buzzer.beep()
             self.state = "live"
 
     def start_profile_select(self):
         """Open profile selection list."""
-        profiles = self.store.list_profiles()
         active_name = self.active_profile()["name"]
-        self.profile_menu_items = ["__back__"] + [p["name"] for p in profiles]
+        self.profile_menu_items = ["__back__"] + [p["name"] for p in self._profiles]
         self.profile_list_index = 0
-        for i, p in enumerate(profiles):
+        for i, p in enumerate(self._profiles):
             if p["name"] == active_name:
                 self.profile_list_index = i + 1
                 break
@@ -250,6 +306,7 @@ class WeighingMachineApp:
 
         profile_name = self.profile_menu_items[self.profile_list_index]
         self.store.select_profile(profile_name)
+        self._reload_cached_settings()
         self.locked_weight = None
         self.stable_count = 0
         self.status_key = "saved"
@@ -267,6 +324,7 @@ class WeighingMachineApp:
         profile_name = self.active_profile()["name"]
         try:
             self.store.delete_profile(profile_name)
+            self._reload_cached_settings()
             self.status_key = "saved"
             self.buzzer.double_beep()
         except ValueError:
@@ -277,6 +335,7 @@ class WeighingMachineApp:
     def reset_configuration(self):
         """Reset profiles, calibration, and runtime config to defaults."""
         self.store.save(self.store.default_data())
+        self._reload_cached_settings()
         save_calibration(config.DEFAULT_TARE_OFFSET, config.DEFAULT_SCALE_FACTOR)
         self.runtime_stable_lock_count = config.STABLE_LOCK_COUNT
         self.runtime_stable_freeze_ms = config.STABLE_FREEZE_MS
@@ -387,9 +446,11 @@ class WeighingMachineApp:
             except ValueError:
                 name = name[: max(1, config.PROFILE_NAME_LENGTH - 1)] + "1"
                 self.store.create_profile(name, self.temp_g)
+            self._reload_cached_settings()
             self.state = "edit_g"
         else:
             self.store.update_profile(self.active_profile()["name"], new_name=name)
+            self._reload_cached_settings()
             self.state = "live"
             self.buzzer.double_beep()
 
@@ -400,27 +461,10 @@ class WeighingMachineApp:
             self.create_mode = False
         else:
             self.store.update_profile(name, g_value=self.temp_g)
+        self._reload_cached_settings()
         self.state = "live"
         self.status_key = "saved"
         self.buzzer.double_beep()
-
-    def send_record(self, dry_run=None):
-        profile = self.active_profile()
-        payload = build_payload(
-            profile_name=profile["name"],
-            g_value=profile["g"],
-            weight_kg=self.current_weight,
-            language=self.language,
-        )
-        if dry_run is None:
-            dry_run = False
-        ok, result = self.cloud.send_payload(payload, dry_run=dry_run)
-        self.status_key = "upload_ok" if ok else "upload_fail"
-        if ok:
-            self.buzzer.double_beep()
-        else:
-            self.buzzer.warning_beep()
-        return ok, result
 
     def handle_events(self, events):
         for event in events:
@@ -468,8 +512,6 @@ class WeighingMachineApp:
             elif action == "profile":
                 self.state = "profile_menu"
                 self.profile_menu_index = 1 if len(self.profile_menu_keys) > 1 else 0
-            elif action == "send":
-                self.send_record()
 
     def _handle_menu_event(self, event):
         if event == "cw":
@@ -650,17 +692,17 @@ class WeighingMachineApp:
                 profile["name"],
                 profile["g"],
                 self.status_key,  # Use status_key which includes "locked" state
-                tr(language, self.status_key),
+                self._status_text(self.status_key),
                 self.action_index,
             )
         elif self.state == "menu":
-            items = [tr(language, key) for key in self.menu_keys]
+            items = self._menu_items(self.menu_keys)
             self.ui.draw_menu(language, items, self.menu_index)
         elif self.state == "profile_menu":
-            items = [tr(language, key) for key in self.profile_menu_keys]
+            items = self._menu_items(self.profile_menu_keys)
             self.ui.draw_menu(language, items, self.profile_menu_index, title_key="profiles")
         elif self.state == "language_menu":
-            items = [tr(language, key) for key in self.language_menu_keys]
+            items = self._menu_items(self.language_menu_keys)
             self.ui.draw_menu(language, items, self.language_menu_index, title_key="language")
         elif self.state == "edit_name":
             self.ui.draw_message(
@@ -716,6 +758,8 @@ class WeighingMachineApp:
 
     def auto_tare_on_startup(self):
         """Wait for stable reading and auto-tare on startup. Returns True if stable before timeout."""
+        if gc is not None:
+            gc.collect()
         self.ui.draw_message(
             self.language,
             tr(self.language, "tare"),
@@ -731,6 +775,8 @@ class WeighingMachineApp:
             self.scale.read_filtered_kg()
             self._tick_boot_leds()
             time.sleep(config.MAIN_LOOP_DELAY_MS / 1000.0)
+        if gc is not None:
+            gc.collect()
 
         # Wait for stability
         wait_interval = 100  # ms
@@ -745,6 +791,8 @@ class WeighingMachineApp:
                 stable = True
                 break
             self._sleep_ms_with_boot_leds(wait_interval)
+        if gc is not None:
+            gc.collect()
 
         # Tare the scale and save to persistent storage
         self.scale.tare()
@@ -768,6 +816,8 @@ class WeighingMachineApp:
         )
 
     def run(self, iterations=None):
+        if gc is not None:
+            gc.collect()
         if self.status_leds is not None:
             self.status_leds.start_boot()
         self.ui.splash(self.language)
@@ -777,6 +827,7 @@ class WeighingMachineApp:
             self.status_leds.finish_boot(tare_ok)
         count = 0
         last_render_ms = 0
+        gc_counter = 0
         while True:
             # High-priority input servicing: drain interrupt queue before rendering.
             had_events = False
@@ -801,21 +852,32 @@ class WeighingMachineApp:
             # If new events arrived, loop immediately; otherwise short sleep.
             if not self.encoder.has_pending_events():
                 time.sleep(config.MAIN_LOOP_DELAY_MS / 1000.0)
+            gc_counter += 1
+            if gc is not None and gc_counter >= 200:
+                gc.collect()
+                gc_counter = 0
             count += 1
             if iterations is not None and count >= iterations:
                 break
 
 
 def build_app():
+    _configure_gc()
+    if gc is not None:
+        gc.collect()
+    config.ensure_data_dir()
     store = ProfileStore(config.PROFILE_FILE)
     if HX711 is None:
         raise RuntimeError("Hardware build requires MicroPython on the Pico")
     adc = HX711(config.HX711_DATA_PIN, config.HX711_SCK_PIN, gain=config.HX711_GAIN)
+    if gc is not None:
+        gc.collect()
     cal_offset, cal_scale = load_calibration()
     scale = ScaleSensor(adc, offset=cal_offset, scale_factor=cal_scale)
     display = create_default_display(config)
+    if gc is not None:
+        gc.collect()
     encoder = RotaryEncoder(config.ENCODER_CLK_PIN, config.ENCODER_DT_PIN, config.ENCODER_SW_PIN)
-    cloud = CloudClient()
     ui = DisplayUI(display)
     buzzer = Buzzer(config.BUZZER_PIN, active_high=config.BUZZER_ACTIVE_HIGH)
     status_leds = StatusLeds(
@@ -825,7 +887,9 @@ def build_app():
         active_high=config.LED_ACTIVE_HIGH,
         buzzer=buzzer,
     )
-    return WeighingMachineApp(store, scale, ui, encoder, buzzer, cloud, status_leds)
+    if gc is not None:
+        gc.collect()
+    return WeighingMachineApp(store, scale, ui, encoder, buzzer, status_leds)
 
 
 def main():

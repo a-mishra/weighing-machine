@@ -1,4 +1,4 @@
-"""Run desktop-safe unit tests under src/tests/."""
+"""Run desktop-safe unit tests under non-src/tests/."""
 
 import importlib
 import os
@@ -11,7 +11,6 @@ _TEST_MODULES = (
     "test_lang",
     "test_scale",
     "test_profiles",
-    "test_cloud",
     "test_buzzer",
     "test_display_layout",
 )

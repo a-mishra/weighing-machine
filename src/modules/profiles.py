@@ -90,6 +90,14 @@ class ProfileStore:
 
     def save(self, data):
         data = self._normalize(data)
+        slash = self.path.rfind("/")
+        backslash = self.path.rfind("\\")
+        idx = slash if slash > backslash else backslash
+        if idx > 0 and os and hasattr(os, "mkdir"):
+            try:
+                os.mkdir(self.path[:idx])
+            except Exception:
+                pass
         temp_path = self.path + ".tmp"
         with open(temp_path, "w") as handle:
             json.dump(data, handle)
