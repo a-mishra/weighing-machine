@@ -18,6 +18,7 @@ from config import (
     MIN_G_VALUE,
     PROFILE_FILE,
     PROFILE_NAME_LENGTH,
+    SUPPORTED_LANGUAGES,
 )
 
 
@@ -45,6 +46,10 @@ class ProfileStore:
                 {"name": "Saturn", "g": 10.4},
                 {"name": "Uranus", "g": 8.9},
                 {"name": "Neptune", "g": 11.2},
+                {"name": "Pluto", "g": 0.6},
+                {"name": "Io", "g": 1.8},
+                {"name": "Europa", "g": 1.3},
+                {"name": "Titan", "g": 1.4},
             ],
         }
 
@@ -70,7 +75,7 @@ class ProfileStore:
             active = clean[0]["name"]
 
         language = data.get("language", DEFAULT_LANGUAGE)
-        if language not in ("en", "hi"):
+        if language not in SUPPORTED_LANGUAGES:
             language = DEFAULT_LANGUAGE
 
         return {
@@ -122,7 +127,7 @@ class ProfileStore:
 
     def set_language(self, language):
         data = self.load()
-        data["language"] = language if language in ("en", "hi") else DEFAULT_LANGUAGE
+        data["language"] = language if language in SUPPORTED_LANGUAGES else DEFAULT_LANGUAGE
         self.save(data)
         return data["language"]
 

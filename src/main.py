@@ -57,7 +57,13 @@ class WeighingMachineApp:
             "edit_g",
             "delete_profile",
         ]
-        self.language_menu_keys = ["back", "english", "hindi"]
+        self.language_map = (
+            ("english", "en"),
+            ("hindi", "hi"),
+            ("french", "fr"),
+            ("german", "de"),
+        )
+        self.language_menu_keys = ["back"] + [item[0] for item in self.language_map]
         self.menu_index = 0
         self.profile_menu_index = 0
         self.language_menu_index = 0
@@ -211,7 +217,12 @@ class WeighingMachineApp:
         self.buzzer.beep()
 
     def toggle_language(self):
-        new_language = "hi" if self.language == "en" else "en"
+        codes = [item[1] for item in self.language_map]
+        try:
+            idx = codes.index(self.language)
+        except ValueError:
+            idx = 0
+        new_language = codes[(idx + 1) % len(codes)]
         self.store.set_language(new_language)
         self._reload_cached_settings()
         self.status_key = "saved"
@@ -246,7 +257,11 @@ class WeighingMachineApp:
             self.start_calibration()
         elif key == "language":
             self.state = "language_menu"
-            self.language_menu_index = 1 if len(self.language_menu_keys) > 1 else 0
+            self.language_menu_index = 1
+            for idx, (_, code) in enumerate(self.language_map):
+                if code == self.language:
+                    self.language_menu_index = idx + 1
+                    break
 
     def activate_profile_menu(self):
         key = self.profile_menu_keys[self.profile_menu_index]
@@ -267,18 +282,15 @@ class WeighingMachineApp:
         key = self.language_menu_keys[self.language_menu_index]
         if key == "back":
             self.state = "menu"
-        elif key == "english":
-            self.store.set_language("en")
-            self._reload_cached_settings()
-            self.status_key = "saved"
-            self.buzzer.beep()
-            self.state = "live"
-        elif key == "hindi":
-            self.store.set_language("hi")
-            self._reload_cached_settings()
-            self.status_key = "saved"
-            self.buzzer.beep()
-            self.state = "live"
+        else:
+            for label_key, code in self.language_map:
+                if key == label_key:
+                    self.store.set_language(code)
+                    self._reload_cached_settings()
+                    self.status_key = "saved"
+                    self.buzzer.beep()
+                    self.state = "live"
+                    break
 
     def start_profile_select(self):
         """Open profile selection list."""

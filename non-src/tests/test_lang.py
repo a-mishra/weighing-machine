@@ -10,8 +10,12 @@ from modules.lang import available_languages, tr
 def main():
     assert "en" in available_languages()
     assert "hi" in available_languages()
+    assert "fr" in available_languages()
+    assert "de" in available_languages()
     assert tr("en", "menu") == "Menu"
-    assert tr("hi", "send") == "Bhejein"
+    assert tr("hi", "send") == "Bhejo"
+    assert tr("fr", "send") == "Envoyer"
+    assert tr("de", "send") == "Senden"
     print("test_lang.py OK")
 
 

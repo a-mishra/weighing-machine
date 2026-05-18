@@ -56,10 +56,10 @@ def ensure_data_dir():
 
 
 DEFAULT_LANGUAGE = "en"  # default: "en" | initial UI language
-SUPPORTED_LANGUAGES = ("en", "hi")  # default: ("en", "hi") | enabled language codes
+SUPPORTED_LANGUAGES = ("en", "hi", "fr", "de")  # enabled language codes
 
 DEFAULT_G_VALUE = 9.8  # default: 9.8 | fallback profile gravity
-MIN_G_VALUE = 1.0  # default: 1.0 | minimum editable gravity
+MIN_G_VALUE = 0.1  # default: 0.1 | minimum editable gravity
 MAX_G_VALUE = 50.0  # default: 50.0 | maximum editable gravity
 G_STEP = 0.1  # default: 0.1 | gravity edit increment
 
