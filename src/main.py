@@ -13,7 +13,6 @@ from modules.buzzer import Buzzer
 from modules.status_leds import StatusLeds
 from modules.display_ui import DisplayUI
 from modules.encoder import RotaryEncoder
-from modules.lang import tr
 from modules.profiles import ProfileStore, clamp_g_value
 from modules.scale import ScaleSensor, load_calibration, save_calibration
 
@@ -21,6 +20,31 @@ try:
     from drivers.hx711 import HX711
 except ImportError:  # pragma: no cover
     HX711 = None
+
+TEXT = {
+    "back": "Back",
+    "recalibration": "Recalib",
+    "language": "Language",
+    "optimize_display": "Optimize RAM",
+    "select_profile": "Select",
+    "create_profile": "Create",
+    "edit_name": "Edit Name",
+    "edit_g": "Edit g",
+    "delete_profile": "Delete",
+    "profiles": "Profiles",
+    "menu": "Menu",
+    "tare": "Tare",
+    "saved": "Saved",
+    "error": "Error",
+    "stable": "Stable",
+    "settling": "Settling",
+    "not_ready": "Unstable",
+    "locked": "Locked",
+}
+
+
+def tr(_language, key):
+    return TEXT.get(key, key)
 
 
 def _configure_gc():
@@ -47,7 +71,7 @@ class WeighingMachineApp:
         self.menu_keys = [
             "back",
             "recalibration",
-            "language",
+            "optimize_display",
         ]
         self.profile_menu_keys = [
             "back",
@@ -57,13 +81,7 @@ class WeighingMachineApp:
             "edit_g",
             "delete_profile",
         ]
-        self.language_map = (
-            ("english", "en"),
-            ("hindi", "hi"),
-            ("french", "fr"),
-            ("german", "de"),
-        )
-        self.language_menu_keys = ["back"] + [item[0] for item in self.language_map]
+        self.language_menu_keys = ["back"]
         self.menu_index = 0
         self.profile_menu_index = 0
         self.language_menu_index = 0
@@ -102,7 +120,7 @@ class WeighingMachineApp:
         self.config_edit_index = 0
         self._menu_item_cache = {}
         self._status_text_cache = {}
-        self._profiles = []
+        self._profile_names = []
         self._active_profile = {"name": "Earth", "g": config.DEFAULT_G_VALUE}
         self._language = config.DEFAULT_LANGUAGE
         self._reload_cached_settings()
@@ -121,11 +139,12 @@ class WeighingMachineApp:
     def _reload_cached_settings(self):
         previous_language = self._language
         data = self.store.load()
-        self._profiles = data.get("profiles", [])
+        profiles = data.get("profiles", [])
+        self._profile_names = [item.get("name", "") for item in profiles if item.get("name")]
         self._language = data.get("language", config.DEFAULT_LANGUAGE)
         active_name = data.get("active_profile", "")
-        self._active_profile = self._profiles[0] if self._profiles else {"name": "Earth", "g": config.DEFAULT_G_VALUE}
-        for item in self._profiles:
+        self._active_profile = profiles[0] if profiles else {"name": "Earth", "g": config.DEFAULT_G_VALUE}
+        for item in profiles:
             if item.get("name") == active_name:
                 self._active_profile = item
                 break
@@ -154,6 +173,35 @@ class WeighingMachineApp:
             return time.ticks_ms()
         except AttributeError:
             return int(time.time() * 1000)
+
+    def optimize_memory_and_display(self):
+        """Try to free memory and re-create display with optimal framebuffer."""
+        if gc is not None:
+            gc.collect()
+
+        current_pixels = int(self.ui.w) * int(self.ui.h)
+        try:
+            upgraded_display = create_default_display(config)
+        except MemoryError:
+            self.status_key = "error"
+            self.buzzer.warning_beep()
+            self.state = "live"
+            return False
+
+        new_pixels = int(upgraded_display.width) * int(upgraded_display.height)
+        if new_pixels >= current_pixels:
+            self.ui.display = upgraded_display
+            self.ui.w = upgraded_display.width
+            self.ui.h = upgraded_display.height
+            self.status_key = "saved"
+            self.buzzer.double_beep()
+        else:
+            self.status_key = "saved"
+            self.buzzer.beep()
+        if gc is not None:
+            gc.collect()
+        self.state = "live"
+        return True
 
     def refresh_weight(self):
         now = self._get_time_ms()
@@ -207,8 +255,13 @@ class WeighingMachineApp:
 
     def cycle_profile(self):
         current = self.active_profile()["name"]
-        names = [item["name"] for item in self._profiles]
-        idx = (names.index(current) + 1) % len(names)
+        names = self._profile_names
+        if not names:
+            return
+        try:
+            idx = (names.index(current) + 1) % len(names)
+        except ValueError:
+            idx = 0
         self.store.select_profile(names[idx])
         self._reload_cached_settings()
         self.locked_weight = None
@@ -217,15 +270,8 @@ class WeighingMachineApp:
         self.buzzer.beep()
 
     def toggle_language(self):
-        codes = [item[1] for item in self.language_map]
-        try:
-            idx = codes.index(self.language)
-        except ValueError:
-            idx = 0
-        new_language = codes[(idx + 1) % len(codes)]
-        self.store.set_language(new_language)
-        self._reload_cached_settings()
-        self.status_key = "saved"
+        # Language module removed; keep English-only runtime.
+        self.status_key = "error"
         self.buzzer.beep()
 
     def start_create_profile(self):
@@ -255,13 +301,8 @@ class WeighingMachineApp:
             self.state = "live"
         elif key == "recalibration":
             self.start_calibration()
-        elif key == "language":
-            self.state = "language_menu"
-            self.language_menu_index = 1
-            for idx, (_, code) in enumerate(self.language_map):
-                if code == self.language:
-                    self.language_menu_index = idx + 1
-                    break
+        elif key == "optimize_display":
+            self.optimize_memory_and_display()
 
     def activate_profile_menu(self):
         key = self.profile_menu_keys[self.profile_menu_index]
@@ -282,23 +323,14 @@ class WeighingMachineApp:
         key = self.language_menu_keys[self.language_menu_index]
         if key == "back":
             self.state = "menu"
-        else:
-            for label_key, code in self.language_map:
-                if key == label_key:
-                    self.store.set_language(code)
-                    self._reload_cached_settings()
-                    self.status_key = "saved"
-                    self.buzzer.beep()
-                    self.state = "live"
-                    break
 
     def start_profile_select(self):
         """Open profile selection list."""
         active_name = self.active_profile()["name"]
-        self.profile_menu_items = ["__back__"] + [p["name"] for p in self._profiles]
+        self.profile_menu_items = ["__back__"] + list(self._profile_names)
         self.profile_list_index = 0
-        for i, p in enumerate(self._profiles):
-            if p["name"] == active_name:
+        for i, name in enumerate(self._profile_names):
+            if name == active_name:
                 self.profile_list_index = i + 1
                 break
         self.state = "select_profile"
@@ -878,6 +910,10 @@ def build_app():
     if gc is not None:
         gc.collect()
     config.ensure_data_dir()
+    # Allocate framebuffer as early as possible, before loading heavier data tables.
+    display = create_default_display(config)
+    if gc is not None:
+        gc.collect()
     store = ProfileStore(config.PROFILE_FILE)
     if HX711 is None:
         raise RuntimeError("Hardware build requires MicroPython on the Pico")
@@ -886,7 +922,6 @@ def build_app():
         gc.collect()
     cal_offset, cal_scale = load_calibration()
     scale = ScaleSensor(adc, offset=cal_offset, scale_factor=cal_scale)
-    display = create_default_display(config)
     if gc is not None:
         gc.collect()
     encoder = RotaryEncoder(config.ENCODER_CLK_PIN, config.ENCODER_DT_PIN, config.ENCODER_SW_PIN)

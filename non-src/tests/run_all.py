@@ -8,7 +8,6 @@ sys.path.insert(0, os.path.dirname(__file__))
 import path_setup  # noqa: E402, F401
 
 _TEST_MODULES = (
-    "test_lang",
     "test_scale",
     "test_profiles",
     "test_buzzer",

@@ -1,7 +1,37 @@
 """Screen rendering helpers with graphics for landscape mode."""
 
 from config import DEFAULT_ACTIONS
-from modules.lang import tr
+
+TEXT = {
+    "title": "Weigh Machine",
+    "menu": "Menu",
+    "select_profile": "Select",
+    "back": "Back",
+    "confirm_delete": "Delete?",
+    "yes": "Yes",
+    "no": "No",
+    "calibrate": "Calibrate",
+    "cal_tare": "Empty Scale",
+    "cal_raw": "Raw",
+    "cal_weight_n": "Weight #",
+    "cal_place": "Place Weight",
+    "cal_input": "Enter Weight",
+    "cal_more": "Add More?",
+    "cal_done": "Calibrated!",
+    "tare": "Tare",
+    "profile": "Profile",
+    "optimize_display": "Optimize",
+    "recalibration": "Recalib",
+    "edit_name": "Edit Name",
+    "edit_g": "Edit g",
+    "delete_profile": "Delete",
+    "create_profile": "Create",
+    "language": "Language",
+}
+
+
+def tr(_language, key):
+    return TEXT.get(key, key)
 
 
 class DisplayUI:
@@ -247,8 +277,12 @@ class DisplayUI:
         # Profile and status info (height: 28px, y: 64-92)
         self.display.fill_rect(4, 64, self.w - 8, 28, self.PANEL_BG)
         self.display.text("P:", 8, 68, self.ACCENT)
-        self.display.text(profile_name[:8], 28, 68, self.PROFILE_COLOR)
-        self.display.text("g=%.1f" % g_value, 100, 68, self.GVALUE_COLOR)
+        g_text = "g=%.1f" % g_value
+        g_x = max(8, self.w - 8 - (len(g_text) * 8))
+        name_x = 28
+        max_name_chars = max(1, (g_x - name_x - 4) // 8)
+        self.display.text(profile_name[:max_name_chars], name_x, 68, self.PROFILE_COLOR)
+        self.display.text(g_text, g_x, 68, self.GVALUE_COLOR)
         
         # Status message on second line of panel
         if stability_level in ("stable", "locked"):
@@ -259,7 +293,8 @@ class DisplayUI:
             status_color = self.SUCCESS
         else:
             status_color = self.INFO
-        self.display.text(status[:18], 8, 80, status_color)
+        max_status_chars = max(1, (self.w - 16) // 8)
+        self.display.text(status[:max_status_chars], 8, 80, status_color)
         
         # Divider before action bar (removes gap, adds line)
         self.display.hline(0, 99, self.w, self.GRAY)

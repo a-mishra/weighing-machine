@@ -245,10 +245,15 @@ def create_default_display(config_module):
     rst = Pin(config_module.TFT_RST_PIN, Pin.OUT)
     bl = Pin(config_module.TFT_BL_PIN, Pin.OUT)
 
-    # Try full resolution first, then low-RAM fallbacks instead of silent no-op mode.
+    # Try full resolution first, then progressively smaller low-RAM fallbacks.
     modes = [
         (config_module.TFT_WIDTH, config_module.TFT_HEIGHT),
+        (144, 128),
+        (136, 128),
         (128, 128),
+        (120, 128),
+        (112, 128),
+        (104, 128),
         (96, 128),
     ]
     tried = set()
@@ -273,4 +278,4 @@ def create_default_display(config_module):
         except MemoryError:
             continue
 
-    raise MemoryError("Unable to allocate ST7735 framebuffer (tried 160x128, 128x128, 96x128)")
+    raise MemoryError("Unable to allocate ST7735 framebuffer for any fallback resolution")

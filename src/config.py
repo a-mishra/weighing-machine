@@ -56,7 +56,7 @@ def ensure_data_dir():
 
 
 DEFAULT_LANGUAGE = "en"  # default: "en" | initial UI language
-SUPPORTED_LANGUAGES = ("en", "hi", "fr", "de")  # enabled language codes
+SUPPORTED_LANGUAGES = ("en",)  # language module removed; single language runtime
 
 DEFAULT_G_VALUE = 9.8  # default: 9.8 | fallback profile gravity
 MIN_G_VALUE = 0.1  # default: 0.1 | minimum editable gravity
@@ -69,16 +69,16 @@ CALIBRATION_FILE = _data_file("calibration.json")  # calibration storage (under 
 # HX711 and load-cell wiring.
 HX711_DATA_PIN = 2  # default: 2 | HX711 DOUT GPIO
 HX711_SCK_PIN = 3  # default: 3 | HX711 SCK GPIO
-HX711_SAMPLES = 12  # default: 12 | runtime raw averaging count
+HX711_SAMPLES = 8  # default: 8 | runtime raw averaging count (lower RAM/CPU)
 HX711_GAIN = 128  # default: 128 | HX711 gain/channel setting
 DEFAULT_TARE_OFFSET = 0  # default: 0 | tare offset if none saved
 DEFAULT_SCALE_FACTOR = 1000.0  # default: 1000.0 | scale factor if none saved
 WEIGHT_CORRECTION_FACTOR = 1.0  # default: 1.0 | post-conversion correction multiplier
 WEIGHT_DECIMALS = 2  # default: 2 | displayed weight decimals
-STABLE_WINDOW = 4  # default: 4 | history length for stability logic
-STABLE_TOLERANCE_KG = 0.10  # default: 0.10 | spread threshold for stable status
-UNSTABLE_TOLERANCE_KG = 0.20  # default: 0.20 | spread threshold for settling status
-EMA_ALPHA = 0.6  # default: 0.6 | EMA smoothing factor
+STABLE_WINDOW = 3  # default: 3 | shorter history (lighter memory, faster lock)
+STABLE_TOLERANCE_KG = 0.15  # default: 0.15 | lenient spread threshold for stable status
+UNSTABLE_TOLERANCE_KG = 0.30  # default: 0.30 | lenient spread threshold for settling status
+EMA_ALPHA = 0.7  # default: 0.7 | slightly faster response, less lag
 STABLE_LOCK_COUNT = 3  # default: 3 | consecutive stable cycles before lock
 STABLE_FREEZE_MS = 8000  # default: 8000 | lock hold duration in ms
 AUTO_TARE_TIMEOUT_MS = 5000  # default: 5000 | startup auto-tare wait timeout
